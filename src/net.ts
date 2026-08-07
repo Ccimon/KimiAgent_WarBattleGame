@@ -25,9 +25,12 @@ export type GuestMsg = { t: 'cmd'; from: number; to: number };
 const ID_PREFIX = 'tower-battle-';
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 去掉易混淆字符
 
-// ICE 服务器:Google STUN + OpenRelay 免费 TURN 中继(含 TCP 443,对称 NAT/受限网络下走中继)
+// ICE 服务器:国内可达 STUN(小米/B站,Google STUN 在国内被墙会导致打洞失败)
+// + Google STUN + OpenRelay 免费 TURN 中继(含 TCP 443,对称 NAT/受限网络下走中继)
 // 注意:直连失败时游戏流量会经过 Metered 的公共中继,介意隐私可换成自建 TURN
 const ICE_SERVERS: RTCIceServer[] = [
+  { urls: 'stun:stun.miwifi.com:3478' },
+  { urls: 'stun:stun.chat.bilibili.com:3478' },
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:global.relay.metered.ca:80' },
   {
@@ -137,11 +140,13 @@ export function joinRoom(code: string, cbs: GuestCallbacks): GuestHandle {
   const peer = new Peer({ config: { iceServers: ICE_SERVERS } });
   let conn: DataConnection | null = null;
   let started = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
 
   peer.on('open', () => {
     conn = peer.connect(ID_PREFIX + code.trim().toUpperCase());
     conn.on('open', () => {
       started = true;
+      clearTimeout(timer);
       cbs.onConnected();
     });
     conn.on('data', (data) => {
@@ -152,6 +157,17 @@ export function joinRoom(code: string, cbs: GuestCallbacks): GuestHandle {
     conn.on('close', () => {
       if (started) cbs.onHostLeave();
     });
+    conn.on('error', () => {
+      clearTimeout(timer);
+      if (!started) cbs.onError('P2P 直连失败,请双方检查网络(代理/防火墙)后重试');
+    });
+    // ICE 打洞超时兜底:避免一直卡在"连接中…"
+    timer = setTimeout(() => {
+      if (!started) {
+        cbs.onError('连接超时,可能是 NAT 打洞失败,请重试或更换网络');
+        peer.destroy();
+      }
+    }, 15000);
   });
   peer.on('error', (err) => {
     if (err.type === 'peer-unavailable') cbs.onError('找不到这个房间,请检查房间码');
@@ -163,6 +179,7 @@ export function joinRoom(code: string, cbs: GuestCallbacks): GuestHandle {
       if (conn?.open) conn.send({ t: 'cmd', from, to } satisfies GuestMsg);
     },
     destroy() {
+      clearTimeout(timer);
       peer.destroy();
     },
   };
