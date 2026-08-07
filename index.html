@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tower Battle - 连线塔战</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        background: #0f172a;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+        color: #e2e8f0;
+        overflow: hidden;
+      }
+      #app {
+        position: relative;
+        width: min(100vw, calc(100vh * 1.6));
+        aspect-ratio: 960 / 600;
+      }
+      canvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+        border-radius: 12px;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      #hud {
+        position: absolute;
+        top: 10px;
+        left: 12px;
+        right: 12px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        pointer-events: none;
+        font-size: 14px;
+      }
+      #hud .group { display: flex; gap: 8px; align-items: center; }
+      #hud button {
+        pointer-events: auto;
+        background: rgba(30, 41, 59, 0.85);
+        color: #e2e8f0;
+        border: 1px solid #475569;
+        border-radius: 8px;
+        padding: 5px 12px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      #hud button:hover { background: #334155; }
+      #level-name {
+        background: rgba(30, 41, 59, 0.85);
+        border: 1px solid #475569;
+        border-radius: 8px;
+        padding: 5px 12px;
+      }
+      #overlay {
+        position: absolute;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: 16px;
+        background: rgba(15, 23, 42, 0.75);
+        border-radius: 12px;
+      }
+      #overlay.show { display: flex; }
+      #overlay-title { font-size: 42px; font-weight: 700; }
+      #overlay button {
+        background: #3b82f6;
+        color: #fff;
+        border: none;
+        border-radius: 10px;
+        padding: 10px 28px;
+        font-size: 16px;
+        cursor: pointer;
+      }
+      #overlay button:hover { background: #2563eb; }
+      #overlay button.secondary { background: #475569; }
+      #overlay button.secondary:hover { background: #334155; }
+      #overlay .btns { display: flex; gap: 12px; }
+      #tip {
+        position: absolute;
+        bottom: 10px;
+        left: 0;
+        right: 0;
+        text-align: center;
+        font-size: 13px;
+        color: #94a3b8;
+        pointer-events: none;
+      }
+      #lobby {
+        position: absolute;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(15, 23, 42, 0.9);
+        border-radius: 12px;
+        z-index: 10;
+      }
+      #lobby.show { display: flex; }
+      #lobby .panel {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 14px;
+        background: rgba(30, 41, 59, 0.95);
+        border: 1px solid #475569;
+        border-radius: 14px;
+        padding: 28px 36px;
+        min-width: 320px;
+      }
+      #lobby h1 { font-size: 26px; margin-bottom: 6px; }
+      #lobby button {
+        background: #3b82f6;
+        color: #fff;
+        border: none;
+        border-radius: 10px;
+        padding: 10px 28px;
+        font-size: 15px;
+        cursor: pointer;
+      }
+      #lobby button:hover { background: #2563eb; }
+      #lobby button.secondary { background: #475569; }
+      #lobby button.secondary:hover { background: #334155; }
+      #lobby .join-row { display: flex; gap: 8px; }
+      #lobby input {
+        background: #0f172a;
+        border: 1px solid #475569;
+        border-radius: 10px;
+        color: #e2e8f0;
+        padding: 9px 12px;
+        font-size: 15px;
+        width: 130px;
+        text-transform: uppercase;
+        text-align: center;
+        letter-spacing: 2px;
+      }
+      #lobby-status { font-size: 14px; color: #94a3b8; }
+      #lobby-error { font-size: 13px; color: #f87171; min-height: 16px; }
+      #room-code-display {
+        font-size: 30px;
+        font-weight: 700;
+        letter-spacing: 6px;
+        color: #facc15;
+      }
+      #lobby .lvl-row { display: flex; gap: 10px; align-items: center; font-size: 14px; }
+      #lobby .lvl-row button { padding: 4px 12px; font-size: 14px; }
+      #hud.hidden { display: none; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="game"></canvas>
+      <div id="hud">
+        <div class="group">
+          <span id="level-name"></span>
+        </div>
+        <div class="group">
+          <button id="btn-prev">上一关</button>
+          <button id="btn-restart">重开</button>
+          <button id="btn-next">下一关</button>
+        </div>
+      </div>
+      <div id="overlay">
+        <div id="overlay-title"></div>
+        <div class="btns">
+          <button id="btn-overlay-restart" class="secondary">重试</button>
+          <button id="btn-overlay-next">下一关</button>
+        </div>
+      </div>
+      <div id="tip">从己方蓝色塔按住拖动到目标塔,松开派出一半兵力</div>
+      <div id="lobby" class="show">
+        <div class="panel">
+          <h1>Tower Battle</h1>
+          <div id="lobby-menu" style="display:flex;flex-direction:column;gap:12px;align-items:center">
+            <button id="btn-solo">单机开始</button>
+            <button id="btn-host" class="secondary">创建联机房间</button>
+            <div class="join-row">
+              <input id="room-code" placeholder="房间码" maxlength="6" />
+              <button id="btn-join" class="secondary">加入房间</button>
+            </div>
+          </div>
+          <div id="lobby-room" style="display:none;flex-direction:column;gap:12px;align-items:center">
+            <div id="room-code-display"></div>
+            <div class="lvl-row" id="lobby-lvl-row" style="display:none">
+              <button id="btn-lvl-prev" class="secondary">‹</button>
+              <span id="lobby-level"></span>
+              <button id="btn-lvl-next" class="secondary">›</button>
+            </div>
+            <div id="lobby-status"></div>
+            <button id="btn-start" style="display:none">开始游戏</button>
+          </div>
+          <div id="lobby-error"></div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
