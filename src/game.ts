@@ -8,6 +8,7 @@ export interface Tower {
   units: number;
   level: number; // 1-3,由兵力阈值推导
   prodAcc: number; // 产兵累积器
+  ap: number; // 行动力:出兵消耗,随时间回复
 }
 
 export interface Squad {
@@ -26,18 +27,25 @@ export interface Squad {
 
 export type Phase = 'playing' | 'won' | 'lost';
 
-// AI 性格:出兵节奏与目标偏好
+// AI 行为:支援(己方塔互派)、扩张(抢中立塔)、进攻(打敌人塔)
+export type Behavior = 'support' | 'expand' | 'attack';
+
+// AI 性格:行为优先级与各行为的门槛参数
 export interface Personality {
   name: string; // 中文名(调试/日后 UI 用)
   interval: number; // 决策间隔(秒)
-  sendFull: number; // 蓄到兵力上限的该比例才出兵
-  minUnits: number; // 低于此兵力不主动行动
+  order: Behavior[]; // 行为优先级,从高到低
+  attackFull: number; // 进攻门槛:蓄到兵力上限的该比例才出兵
+  minUnits: number; // 进攻最低兵力
   huntStrong: boolean; // true=专打最强对手的最弱塔,false=打全场最弱塔
+  supportFactor: number; // 支援触发:净威胁 > 塔兵力 × 该系数(越大越不爱救)
+  expandSlack: number; // 扩张门槛:兵力 ≥ 灰塔兵力 + 该值(越小越爱抢地)
 }
 
 export interface GameState {
   towers: Tower[];
   squads: Squad[];
+  edges: [number, number][]; // 道路:只能沿边派兵(无向)
   phase: Phase;
   levelIndex: number;
   time: number;
@@ -49,14 +57,20 @@ export interface GameState {
 export const TOWER_RADIUS = 34;
 export const SEND_RATIO = 0.5;
 export const SQUAD_SPEED = 110; // 像素/秒(导出供联机客人端平滑推进队伍)
+export const AP_MAX = 100; // 行动力上限
+export const SEND_COST = 34; // 每次出兵固定消耗(满 AP 约可连续出兵 3 次)
+export const AP_REGEN = 8; // 行动力每秒回复(约 4.25 秒回够一次出兵)
 const AI_FACTIONS: Owner[] = ['ai1', 'ai2'];
 
-// AI 性格表:莽夫频繁出手,龟缩憋满再打,猎强专挑最强对手下手
+// AI 性格表:莽夫快攻不救家,龟缩死守憋满再打,猎强专挑最强对手,农夫疯狂圈地
 const AI_PERSONALITIES: Personality[] = [
-  { name: '莽夫', interval: 1.0, sendFull: 0.55, minUnits: 6, huntStrong: false },
-  { name: '龟缩', interval: 2.2, sendFull: 0.95, minUnits: 12, huntStrong: false },
-  { name: '猎强', interval: 1.5, sendFull: 0.8, minUnits: 8, huntStrong: true },
+  { name: '莽夫', interval: 1.0, order: ['attack', 'expand', 'support'], attackFull: 0.55, minUnits: 6, huntStrong: false, supportFactor: 2, expandSlack: 5 },
+  { name: '龟缩', interval: 2.2, order: ['support', 'expand', 'attack'], attackFull: 0.95, minUnits: 12, huntStrong: false, supportFactor: 1, expandSlack: 5 },
+  { name: '猎强', interval: 1.5, order: ['attack', 'support', 'expand'], attackFull: 0.8, minUnits: 8, huntStrong: true, supportFactor: 1, expandSlack: 5 },
+  { name: '农夫', interval: 2.0, order: ['expand', 'support', 'attack'], attackFull: 0.95, minUnits: 12, huntStrong: false, supportFactor: 1, expandSlack: 2 },
 ];
+
+const SUPPORT_RICH = 15; // 安全塔兵力达到此值才视为"富裕",可派兵支援
 
 // 等级 -> 产兵速率(个/秒)与兵力上限(仅限制生产,增援可超出)
 const LEVEL_STATS: Record<number, { rate: number; cap: number }> = {
@@ -80,7 +94,7 @@ export interface TowerInit {
   units: number;
 }
 
-export function createGame(levelIndex: number, defs: TowerInit[]): GameState {
+export function createGame(levelIndex: number, defs: TowerInit[], edges: [number, number][]): GameState {
   // 每个 AI 势力独立随机抽性格(允许重复)
   const aiTimers: Partial<Record<Owner, number>> = {};
   const aiTraits: Partial<Record<Owner, Personality>> = {};
@@ -97,8 +111,10 @@ export function createGame(levelIndex: number, defs: TowerInit[]): GameState {
       units: d.units,
       level: levelOf(d.units),
       prodAcc: 0,
+      ap: AP_MAX,
     })),
     squads: [],
+    edges,
     phase: 'playing',
     levelIndex,
     time: 0,
@@ -106,6 +122,13 @@ export function createGame(levelIndex: number, defs: TowerInit[]): GameState {
     aiTraits,
     nextSquadId: 1,
   };
+}
+
+// 两塔之间是否有道路(无向)
+export function hasEdge(state: GameState, a: number, b: number): boolean {
+  return state.edges.some(
+    ([x, y]) => (x === a && y === b) || (x === b && y === a),
+  );
 }
 
 // 联机中客人掉线后,把该势力交给 AI 接管;也可用于开局时摘除真人势力的 AI(先 delete 再按需调用)
@@ -127,9 +150,12 @@ export function sendUnits(state: GameState, fromId: number, toId: number): boole
   const from = state.towers[fromId];
   const to = state.towers[toId];
   if (!from || !to) return false;
+  if (!hasEdge(state, fromId, toId)) return false; // 只能沿道路派兵
+  if (from.ap < SEND_COST) return false; // 行动力不足无法出兵
   const count = Math.floor(from.units * SEND_RATIO);
   if (count < 1) return false;
   from.units -= count;
+  from.ap -= SEND_COST;
   from.level = levelOf(from.units);
   const dist = Math.hypot(to.x - from.x, to.y - from.y);
   state.squads.push({
@@ -172,36 +198,138 @@ function factionPower(state: GameState, owner: Owner): number {
   return sum;
 }
 
-function aiTick(state: GameState, faction: Owner): void {
-  const trait = state.aiTraits[faction];
-  if (!trait) return;
-  const foes = state.towers.filter((o) => o.owner !== faction);
+// 威胁评估:每座己方塔的净威胁(在路上敌军 - 在路上己方援军)与最近敌军到达时间(秒)
+function assessThreats(
+  state: GameState,
+  faction: Owner,
+): { threat: Map<number, number>; enemyEta: Map<number, number> } {
+  const threat = new Map<number, number>();
+  const enemyEta = new Map<number, number>();
+  for (const s of state.squads) {
+    const target = state.towers[s.target];
+    if (!target || target.owner !== faction) continue;
+    const v = threat.get(s.target) ?? 0;
+    if (s.owner === faction) {
+      threat.set(s.target, v - s.count); // 己方援军抵消威胁
+    } else {
+      threat.set(s.target, v + s.count);
+      const eta = (s.dist - s.travelled) / SQUAD_SPEED;
+      const cur = enemyEta.get(s.target);
+      if (cur === undefined || eta < cur) enemyEta.set(s.target, eta);
+    }
+  }
+  return { threat, enemyEta };
+}
+
+// 支援:威胁超标的塔,由最近的安全富裕塔派一半兵力去救;援军到不了就放弃
+function doSupport(
+  state: GameState,
+  faction: Owner,
+  trait: Personality,
+  threat: Map<number, number>,
+  enemyEta: Map<number, number>,
+  busy: Set<number>,
+): void {
+  const mine = state.towers.filter((t) => t.owner === faction);
+  const inDanger = mine
+    .filter((t) => (threat.get(t.id) ?? 0) > t.units * trait.supportFactor)
+    .sort((a, b) => (threat.get(b.id) ?? 0) - (threat.get(a.id) ?? 0));
+  for (const weak of inDanger) {
+    // 最近的可用安全塔(邻接、无敌军在路上、兵力富裕、本 tick 未出兵、不是自己)
+    let best: Tower | null = null;
+    let bestDist = Infinity;
+    for (const o of mine) {
+      if (o.id === weak.id || busy.has(o.id)) continue;
+      if (!hasEdge(state, o.id, weak.id)) continue; // 道路约束:只能邻接支援
+      if ((threat.get(o.id) ?? 0) > 0 || o.units < SUPPORT_RICH) continue;
+      const d = Math.hypot(o.x - weak.x, o.y - weak.y);
+      if (d < bestDist) {
+        bestDist = d;
+        best = o;
+      }
+    }
+    if (!best) continue;
+    const eta = enemyEta.get(weak.id);
+    if (eta !== undefined && bestDist / SQUAD_SPEED >= eta) continue; // 援军到不了,不白送
+    if (sendUnits(state, best.id, weak.id)) busy.add(best.id);
+  }
+}
+
+// 扩张:低门槛抢邻接灰塔,按"兵力 + 距离×0.02"挑目标;路上兵力够了就顺延下一座
+function doExpand(state: GameState, faction: Owner, trait: Personality, busy: Set<number>): void {
+  const mine = state.towers.filter((t) => t.owner === faction);
+  const neutrals = state.towers
+    .filter((t) => t.owner === 'neutral' && mine.some((o) => hasEdge(state, o.id, t.id)))
+    .map((t) => {
+      const near = mine
+        .filter((o) => hasEdge(state, o.id, t.id))
+        .reduce((m, o) => Math.min(m, Math.hypot(o.x - t.x, o.y - t.y)), Infinity);
+      return { t, score: t.units + near * 0.02 };
+    })
+    .sort((a, b) => a.score - b.score);
+  for (const { t } of neutrals) {
+    let inbound = state.squads
+      .filter((s) => s.owner === faction && s.target === t.id)
+      .reduce((sum, s) => sum + s.count, 0);
+    if (inbound >= t.units) continue; // 已有足够队伍在路上,去重
+    // 就近派出满足低门槛的邻接塔
+    const candidates = mine
+      .filter((o) => !busy.has(o.id) && hasEdge(state, o.id, t.id) && o.units >= t.units + trait.expandSlack)
+      .sort((a, b) => Math.hypot(a.x - t.x, a.y - t.y) - Math.hypot(b.x - t.x, b.y - t.y));
+    for (const o of candidates) {
+      if (inbound >= t.units) break;
+      const sent = Math.floor(o.units * SEND_RATIO);
+      if (sendUnits(state, o.id, t.id)) {
+        busy.add(o.id);
+        inbound += sent;
+      }
+    }
+  }
+}
+
+// 进攻:全势力集火同一目标,蓄到高门槛才出兵
+function doAttack(state: GameState, faction: Owner, trait: Personality, busy: Set<number>): void {
+  const foes = state.towers.filter((o) => o.owner !== faction && o.owner !== 'neutral');
   if (foes.length === 0) return;
 
-  // 选目标:默认打兵力最少的塔;猎强性格先锁定总兵力最强的对手势力
-  let pool = foes;
+  // 猎强性格先锁定总兵力最强的对手势力,在目标选择时优先它的塔
+  let strongest: Owner | null = null;
   if (trait.huntStrong) {
-    let strongest: Owner | null = null;
     let best = -1;
     for (const o of foes.map((t) => t.owner)) {
-      if (o === 'neutral') continue; // 中立不算对手势力
       const p = factionPower(state, o);
       if (p > best) {
         best = p;
         strongest = o;
       }
     }
-    const owned = strongest === null ? [] : foes.filter((t) => t.owner === strongest);
-    if (owned.length > 0) pool = owned;
   }
-  const target = pool.reduce((a, b) => (b.units < a.units ? b : a));
 
+  // 道路约束下每座塔独立选目标:优先打邻接的"目标势力"塔,否则打最弱的邻接敌塔
   for (const t of state.towers) {
-    if (t.owner !== faction) continue;
+    if (t.owner !== faction || busy.has(t.id)) continue;
     // 蓄到接近满员再倾巢进攻:多塔兵力叠加才能压过守方的生产恢复
     if (t.units < trait.minUnits) continue;
-    if (t.units < LEVEL_STATS[t.level].cap * trait.sendFull) continue;
-    sendUnits(state, t.id, target.id);
+    if (t.units < LEVEL_STATS[t.level].cap * trait.attackFull) continue;
+    const adjacent = foes.filter((f) => hasEdge(state, t.id, f.id));
+    if (adjacent.length === 0) continue;
+    const preferred =
+      strongest === null ? [] : adjacent.filter((f) => f.owner === strongest);
+    const pool = preferred.length > 0 ? preferred : adjacent;
+    const target = pool.reduce((a, b) => (b.units < a.units ? b : a));
+    if (sendUnits(state, t.id, target.id)) busy.add(t.id);
+  }
+}
+
+function aiTick(state: GameState, faction: Owner): void {
+  const trait = state.aiTraits[faction];
+  if (!trait) return;
+  const { threat, enemyEta } = assessThreats(state, faction);
+  const busy = new Set<number>(); // 本 tick 已出兵的塔,避免一座塔重复行动
+  for (const b of trait.order) {
+    if (b === 'support') doSupport(state, faction, trait, threat, enemyEta, busy);
+    else if (b === 'expand') doExpand(state, faction, trait, busy);
+    else doAttack(state, faction, trait, busy);
   }
 }
 
@@ -221,6 +349,11 @@ function checkPhase(state: GameState): void {
 export function update(state: GameState, dt: number): void {
   if (state.phase !== 'playing') return;
   state.time += dt;
+
+  // 行动力回复(中立塔也回,简化逻辑;只有主动出兵才消耗)
+  for (const t of state.towers) {
+    t.ap = Math.min(AP_MAX, t.ap + AP_REGEN * dt);
+  }
 
   // 产兵(中立塔不产兵,到达上限后停止)
   for (const t of state.towers) {

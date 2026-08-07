@@ -3,6 +3,7 @@ import type { TowerInit } from './game';
 export interface LevelDef {
   name: string;
   towers: TowerInit[];
+  edges: [number, number][]; // 道路:塔下标对(无向),只能沿边派兵
 }
 
 // 逻辑画布 960x600
@@ -13,6 +14,10 @@ export const LEVELS: LevelDef[] = [
       { x: 140, y: 300, owner: 'player', units: 30 },
       { x: 480, y: 300, owner: 'neutral', units: 10 },
       { x: 820, y: 300, owner: 'ai1', units: 25 },
+    ],
+    edges: [
+      [0, 1],
+      [1, 2],
     ],
   },
   {
@@ -25,6 +30,15 @@ export const LEVELS: LevelDef[] = [
       { x: 830, y: 170, owner: 'ai1', units: 30 },
       { x: 830, y: 430, owner: 'ai1', units: 25 },
     ],
+    edges: [
+      [0, 1],
+      [0, 3],
+      [1, 2],
+      [2, 3],
+      [3, 4],
+      [2, 5],
+      [4, 5],
+    ],
   },
   {
     name: '第 3 关',
@@ -35,6 +49,15 @@ export const LEVELS: LevelDef[] = [
       { x: 600, y: 300, owner: 'neutral', units: 20 },
       { x: 830, y: 140, owner: 'ai1', units: 35 },
       { x: 830, y: 460, owner: 'ai1', units: 35 },
+    ],
+    edges: [
+      [0, 1],
+      [0, 2],
+      [1, 3],
+      [2, 3],
+      [3, 4],
+      [3, 5],
+      [4, 5],
     ],
   },
   // 三方会战:玩家(蓝)vs ai1(红)vs ai2(紫),中立塔作缓冲
@@ -48,6 +71,16 @@ export const LEVELS: LevelDef[] = [
       { x: 300, y: 250, owner: 'neutral', units: 10 },
       { x: 660, y: 250, owner: 'neutral', units: 10 },
     ],
+    edges: [
+      [0, 4],
+      [0, 3],
+      [1, 3],
+      [1, 5],
+      [2, 4],
+      [2, 5],
+      [3, 4],
+      [3, 5],
+    ],
   },
   {
     name: '第 5 关',
@@ -59,6 +92,17 @@ export const LEVELS: LevelDef[] = [
       { x: 250, y: 400, owner: 'neutral', units: 10 },
       { x: 710, y: 400, owner: 'neutral', units: 10 },
     ],
+    edges: [
+      [0, 3],
+      [1, 3],
+      [2, 4],
+      [2, 5],
+      [3, 4],
+      [3, 5],
+      [4, 5],
+      [0, 4],
+      [1, 5],
+    ],
   },
   {
     name: '第 6 关',
@@ -69,6 +113,14 @@ export const LEVELS: LevelDef[] = [
       { x: 480, y: 300, owner: 'neutral', units: 20 },
       { x: 480, y: 110, owner: 'neutral', units: 12 },
       { x: 480, y: 490, owner: 'neutral', units: 12 },
+    ],
+    edges: [
+      [0, 3],
+      [3, 4],
+      [3, 5],
+      [4, 1],
+      [5, 2],
+      [4, 5],
     ],
   },
 ];

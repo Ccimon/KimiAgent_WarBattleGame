@@ -1,5 +1,5 @@
 import type { GameState, Owner } from './game';
-import { TOWER_RADIUS } from './game';
+import { TOWER_RADIUS, hasEdge, AP_MAX, SEND_COST } from './game';
 
 export const COLORS: Record<Owner, string> = {
   player: '#3b82f6',
@@ -61,6 +61,14 @@ function drawTower(
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(String(Math.floor(t.units)), t.x, t.y);
+
+  // 行动力条(塔下方,不足一次出兵时变暗)
+  const apW = 40;
+  const apY = t.y + TOWER_RADIUS + 6;
+  ctx.fillStyle = '#334155';
+  ctx.fillRect(t.x - apW / 2, apY, apW, 5);
+  ctx.fillStyle = t.ap >= SEND_COST ? '#4ade80' : '#64748b';
+  ctx.fillRect(t.x - apW / 2, apY, (apW * t.ap) / AP_MAX, 5);
 }
 
 function drawSquad(ctx: CanvasRenderingContext2D, state: GameState, s: (typeof state.squads)[number]): void {
@@ -112,17 +120,40 @@ export function draw(ctx: CanvasRenderingContext2D, state: GameState, drag: Drag
     ctx.stroke();
   }
 
-  for (const s of state.squads) drawSquad(ctx, state, s);
-  for (const t of state.towers) drawTower(ctx, state, t.id, drag.fromId === t.id);
+  // 道路(塔间连线,只能沿边派兵)
+  ctx.strokeStyle = '#475569';
+  ctx.lineWidth = 3;
+  ctx.setLineDash([2, 6]);
+  for (const [a, b] of state.edges) {
+    const ta = state.towers[a];
+    const tb = state.towers[b];
+    ctx.beginPath();
+    ctx.moveTo(ta.x, ta.y);
+    ctx.lineTo(tb.x, tb.y);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
 
-  // 拖线预览
+  for (const s of state.squads) drawSquad(ctx, state, s);
+  // 拖拽时高亮起点和所有邻接(合法目标)塔
+  for (const t of state.towers)
+    drawTower(
+      ctx,
+      state,
+      t.id,
+      drag.fromId !== null && (t.id === drag.fromId || hasEdge(state, drag.fromId, t.id)),
+    );
+
+  // 拖线预览(行动力不足时变灰提示)
   if (drag.fromId !== null) {
     const from = state.towers[drag.fromId];
+    const usable = from.ap >= SEND_COST;
+    const lineColor = usable ? '#facc15' : '#64748b';
     ctx.beginPath();
     ctx.moveTo(from.x, from.y);
     ctx.lineTo(drag.x, drag.y);
     ctx.setLineDash([8, 6]);
-    ctx.strokeStyle = '#facc15';
+    ctx.strokeStyle = lineColor;
     ctx.lineWidth = 3;
     ctx.stroke();
     ctx.setLineDash([]);
@@ -130,11 +161,11 @@ export function draw(ctx: CanvasRenderingContext2D, state: GameState, drag: Drag
     // 预览派出数量
     const count = Math.floor(from.units * 0.5);
     if (count > 0) {
-      ctx.fillStyle = '#facc15';
+      ctx.fillStyle = lineColor;
       ctx.font = 'bold 15px -apple-system, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
-      ctx.fillText(`-${count}`, drag.x, drag.y - 12);
+      ctx.fillText(usable ? `-${count}` : '行动力不足', drag.x, drag.y - 12);
     }
   }
 }

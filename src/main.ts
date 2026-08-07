@@ -6,6 +6,7 @@ import {
   towerAt,
   update,
   SQUAD_SPEED,
+  SEND_COST,
   type GameState,
   type Owner,
 } from './game';
@@ -45,7 +46,7 @@ type Mode = 'solo' | 'host' | 'guest';
 let mode: Mode = 'solo';
 let myFaction: Owner = 'player';
 let levelIndex = 0;
-let state: GameState = createGame(0, LEVELS[0].towers); // 开场背景
+let state: GameState = createGame(0, LEVELS[0].towers, LEVELS[0].edges); // 开场背景
 const drag: DragState = { fromId: null, x: 0, y: 0 };
 
 let host: HostHandle | null = null;
@@ -60,7 +61,7 @@ function loadLevel(index: number): GameState {
   levelNameEl.textContent = def.name;
   overlayEl.classList.remove('show');
   overlayShown = false;
-  return createGame(levelIndex, def.towers);
+  return createGame(levelIndex, def.towers, def.edges);
 }
 
 // 联机建房:摘掉红方(ai1)的 AI,留给真人客人
@@ -227,7 +228,7 @@ startBtn.addEventListener('click', () => {
 function buildSnapshot(): Snapshot {
   return {
     t: 'snap',
-    towers: state.towers.map((t) => ({ owner: t.owner, units: t.units })),
+    towers: state.towers.map((t) => ({ owner: t.owner, units: t.units, ap: t.ap })),
     squads: state.squads.map((s) => ({
       id: s.id,
       owner: s.owner,
@@ -246,6 +247,7 @@ function applySnapshot(snap: Snapshot): void {
     const t = state.towers[i];
     t.owner = snap.towers[i].owner;
     t.units = snap.towers[i].units;
+    t.ap = snap.towers[i].ap;
     t.level = levelOf(t.units);
   }
   // 队伍按快照重建位置;本地已推进的取较大值避免回跳
@@ -311,8 +313,12 @@ canvas.addEventListener('pointerup', (e) => {
   const p = toLogical(e);
   const target = towerAt(state, p.x, p.y);
   if (target && target.id !== drag.fromId) {
-    if (mode === 'guest') guest?.sendCmd(drag.fromId, target.id);
-    else sendUnits(state, drag.fromId, target.id);
+    if (mode === 'guest') {
+      // 本地预判行动力,不足就不发(房主端仍会最终校验)
+      if (state.towers[drag.fromId].ap >= SEND_COST) guest?.sendCmd(drag.fromId, target.id);
+    } else {
+      sendUnits(state, drag.fromId, target.id);
+    }
   }
   drag.fromId = null;
 });

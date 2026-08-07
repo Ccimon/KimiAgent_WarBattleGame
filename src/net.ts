@@ -14,7 +14,7 @@ export interface SnapSquad {
 
 export interface Snapshot {
   t: 'snap';
-  towers: { owner: Owner; units: number }[];
+  towers: { owner: Owner; units: number; ap: number }[];
   squads: SnapSquad[];
   phase: Phase;
 }
@@ -24,6 +24,28 @@ export type GuestMsg = { t: 'cmd'; from: number; to: number };
 
 const ID_PREFIX = 'tower-battle-';
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 去掉易混淆字符
+
+// ICE 服务器:Google STUN + OpenRelay 免费 TURN 中继(含 TCP 443,对称 NAT/受限网络下走中继)
+// 注意:直连失败时游戏流量会经过 Metered 的公共中继,介意隐私可换成自建 TURN
+const ICE_SERVERS: RTCIceServer[] = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:global.relay.metered.ca:80' },
+  {
+    urls: 'turn:global.relay.metered.ca:80',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+  {
+    urls: 'turn:global.relay.metered.ca:443',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+  {
+    urls: 'turns:global.relay.metered.ca:443?transport=tcp',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+];
 
 function randomCode(): string {
   let s = '';
@@ -69,7 +91,7 @@ export function hostRoom(cbs: HostCallbacks): HostHandle {
 
   function create(): void {
     const code = randomCode();
-    const peer = new Peer(ID_PREFIX + code);
+    const peer = new Peer(ID_PREFIX + code, { config: { iceServers: ICE_SERVERS } });
     peer.on('open', () => cbs.onReady(code));
     peer.on('error', (err) => {
       if (err.type === 'unavailable-id') {
@@ -112,7 +134,7 @@ export interface GuestHandle {
 }
 
 export function joinRoom(code: string, cbs: GuestCallbacks): GuestHandle {
-  const peer = new Peer();
+  const peer = new Peer({ config: { iceServers: ICE_SERVERS } });
   let conn: DataConnection | null = null;
   let started = false;
 
