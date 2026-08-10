@@ -23,6 +23,8 @@ export interface Squad {
   dirY: number;
   dist: number;
   travelled: number;
+  fighting: boolean; // 遭遇战中:停驻并互相消减兵力
+  dmgAcc: number; // 战斗损伤累积器(不满 1 不掉兵)
 }
 
 export type Phase = 'playing' | 'won' | 'lost';
@@ -60,6 +62,8 @@ export const SQUAD_SPEED = 110; // 像素/秒(导出供联机客人端平滑推�
 export const AP_MAX = 100; // 行动力上限
 export const SEND_COST = 34; // 每次出兵固定消耗(满 AP 约可连续出兵 3 次)
 export const AP_REGEN = 8; // 行动力每秒回复(约 4.25 秒回够一次出兵)
+const CONTACT_RANGE = 16; // 同一条边上位置差小于此值判定遭遇(像素)
+const FIGHT_RATE = 8; // 遭遇战交换速度:每秒双方各掉 8 兵(1:1)
 const AI_FACTIONS: Owner[] = ['ai1', 'ai2'];
 
 // AI 性格表:莽夫快攻不救家,龟缩死守憋满再打,猎强专挑最强对手,农夫疯狂圈地
@@ -170,6 +174,8 @@ export function sendUnits(state: GameState, fromId: number, toId: number): boole
     dirY: (to.y - from.y) / dist,
     dist,
     travelled: 0,
+    fighting: false,
+    dmgAcc: 0,
   });
   return true;
 }
@@ -369,17 +375,61 @@ export function update(state: GameState, dt: number): void {
     }
   }
 
-  // 队伍行军
+  // 遭遇判定:不同势力、同一条边(含对向)、沿边位置足够近 -> 双方停下交战
+  // 边上位置统一换算为"距 from 端点的距离",对向队伍用 dist - travelled
+  const battles: [Squad, Squad][] = [];
+  for (const s of state.squads) s.fighting = false;
+  for (let i = 0; i < state.squads.length; i++) {
+    for (let j = i + 1; j < state.squads.length; j++) {
+      const a = state.squads[i];
+      const b = state.squads[j];
+      if (a.owner === b.owner) continue;
+      let pa: number, pb: number;
+      if (a.from === b.from && a.target === b.target) {
+        pa = a.travelled;
+        pb = b.travelled;
+      } else if (a.from === b.target && a.target === b.from) {
+        pa = a.travelled;
+        pb = b.dist - b.travelled;
+      } else {
+        continue; // 不在同一条边上(跨边空中交叉不算相遇)
+      }
+      if (Math.abs(pa - pb) < CONTACT_RANGE) {
+        a.fighting = true;
+        b.fighting = true;
+        battles.push([a, b]);
+      }
+    }
+  }
+
+  // 队伍行军(交战中的队伍停驻)
   for (const s of state.squads) {
+    if (s.fighting) continue;
     s.travelled += SQUAD_SPEED * dt;
     s.x += s.dirX * SQUAD_SPEED * dt;
     s.y += s.dirY * SQUAD_SPEED * dt;
   }
-  const arrived = state.squads.filter((s) => s.travelled >= s.dist);
+  const arrived = state.squads.filter((s) => !s.fighting && s.travelled >= s.dist);
   if (arrived.length > 0) {
-    state.squads = state.squads.filter((s) => s.travelled < s.dist);
+    const arrivedIds = new Set(arrived.map((s) => s.id));
+    state.squads = state.squads.filter((s) => !arrivedIds.has(s.id));
     for (const s of arrived) arrive(state, s);
   }
+
+  // 遭遇战结算:1:1 互相消减,清零的队伍移除(幸存方下一 tick 继续行军)
+  for (const [a, b] of battles) {
+    a.dmgAcc += FIGHT_RATE * dt;
+    b.dmgAcc += FIGHT_RATE * dt;
+  }
+  let anyDead = false;
+  for (const s of state.squads) {
+    if (!s.fighting || s.dmgAcc < 1) continue;
+    const dead = Math.floor(s.dmgAcc);
+    s.dmgAcc -= dead;
+    s.count -= dead;
+    if (s.count <= 0) anyDead = true;
+  }
+  if (anyDead) state.squads = state.squads.filter((s) => s.count > 0);
 
   // 敌方 AI:每个势力独立计时、独立性格
   for (const f of AI_FACTIONS) {

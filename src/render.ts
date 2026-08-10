@@ -97,6 +97,17 @@ function drawSquad(ctx: CanvasRenderingContext2D, state: GameState, s: (typeof s
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(String(s.count), s.x, s.y);
+
+  // 交战特效:闪烁的白色锯齿圈提示这里在打
+  if (s.fighting) {
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, r + 5, 0, Math.PI * 2);
+    ctx.strokeStyle = '#f8fafc';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
 }
 
 export function draw(ctx: CanvasRenderingContext2D, state: GameState, drag: DragState): void {

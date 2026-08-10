@@ -236,6 +236,7 @@ function buildSnapshot(): Snapshot {
       target: s.target,
       count: s.count,
       travelled: s.travelled,
+      fighting: s.fighting,
     })),
     phase: state.phase,
   };
@@ -256,7 +257,8 @@ function applySnapshot(snap: Snapshot): void {
     const from = state.towers[ss.from];
     const to = state.towers[ss.target];
     const dist = Math.hypot(to.x - from.x, to.y - from.y);
-    const travelled = Math.max(ss.travelled, local.get(ss.id) ?? 0);
+    // 交战中的队伍位置以快照为准(不回跳保护),其余取较大值避免回跳
+    const travelled = ss.fighting ? ss.travelled : Math.max(ss.travelled, local.get(ss.id) ?? 0);
     const dirX = (to.x - from.x) / dist;
     const dirY = (to.y - from.y) / dist;
     return {
@@ -271,6 +273,8 @@ function applySnapshot(snap: Snapshot): void {
       dirY,
       dist,
       travelled,
+      fighting: ss.fighting,
+      dmgAcc: 0,
     };
   });
   state.phase = snap.phase;
@@ -381,8 +385,9 @@ function frame(now: number): void {
   last = now;
 
   if (mode === 'guest') {
-    // 客人端:不跑游戏逻辑,只本地推进队伍位置等下一帧快照
+    // 客人端:不跑游戏逻辑,只本地推进队伍位置等下一帧快照(交战中的队伍停驻)
     for (const s of state.squads) {
+      if (s.fighting) continue;
       s.travelled = Math.min(s.travelled + SQUAD_SPEED * dt, s.dist);
       s.x = state.towers[s.from].x + s.dirX * s.travelled;
       s.y = state.towers[s.from].y + s.dirY * s.travelled;

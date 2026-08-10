@@ -10,6 +10,7 @@ export interface SnapSquad {
   target: number;
   count: number;
   travelled: number;
+  fighting: boolean; // 交战中:客人端不再本地推进
 }
 
 export interface Snapshot {
