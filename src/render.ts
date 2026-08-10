@@ -1,5 +1,5 @@
 import type { GameState, Owner, TowerKind } from './game';
-import { TOWER_RADIUS, hasEdge, AP_MAX, SEND_COST } from './game';
+import { TOWER_RADIUS, hasEdge, capOf, AP_MAX, SEND_COST } from './game';
 
 export const COLORS: Record<Owner, string> = {
   player: '#3b82f6',
@@ -77,8 +77,10 @@ function drawTower(
     ctx.fillRect(t.x - (t.level * 10) / 2 + i * 10 + 1, t.y - TOWER_RADIUS - 12, 8, 6);
   }
 
-  // 兵力数字
-  ctx.fillStyle = '#ffffff';
+  // 兵力数字(满员停产时变黄提示;中立塔和矿塔本就不产兵,不提示)
+  const full =
+    t.owner !== 'neutral' && t.kind !== 'mine' && t.units >= capOf(t);
+  ctx.fillStyle = full ? '#facc15' : '#ffffff';
   ctx.font = 'bold 20px -apple-system, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';

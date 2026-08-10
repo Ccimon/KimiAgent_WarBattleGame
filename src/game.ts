@@ -84,27 +84,32 @@ const SUPPORT_RICH = 15; // 安全塔兵力达到此值才视为"富裕",可派�
 
 // 等级 -> 产兵速率(个/秒)与兵力上限(仅限制生产,增援可超出)
 const LEVEL_STATS: Record<number, { rate: number; cap: number }> = {
-  1: { rate: 0.6, cap: 20 },
-  2: { rate: 1.0, cap: 40 },
-  3: { rate: 1.6, cap: 60 },
+  1: { rate: 0.7, cap: 20 },
+  2: { rate: 1.1, cap: 40 },
+  3: { rate: 1.3, cap: 60 },
 };
 
 // 塔类型修正:产速/上限倍率、守方减伤(来袭有效兵力折扣)、AP 回复倍率
 const KIND_MODS: Record<TowerKind, { prodMul: number; capMul: number; defMul: number; apMul: number }> = {
   normal: { prodMul: 1, capMul: 1, defMul: 1, apMul: 1 },
   fortress: { prodMul: 0.5, capMul: 1, defMul: 0.75, apMul: 1 }, // 守战减伤 25%,产兵慢
-  barracks: { prodMul: 2, capMul: 0.5, defMul: 1, apMul: 1 }, // 造血快但囤不住
+  barracks: { prodMul: 2, capMul: 0.75, defMul: 1, apMul: 1 }, // 造血快但囤不住
   watch: { prodMul: 1, capMul: 1, defMul: 1, apMul: 2 }, // 指挥中枢,AP 回复快
   mine: { prodMul: 0, capMul: 1, defMul: 1, apMul: 1 }, // 不产兵,光环见 MINE_AURA
 };
 const MINE_AURA = 0.5; // 每座相邻己方矿塔为产速加成 +50%(可叠加)
 
-const UPGRADE_AT = [35, 15]; // units >= 35 -> 3 级, >= 15 -> 2 级
-
-export function levelOf(units: number): number {
-  if (units >= UPGRADE_AT[0]) return 3;
-  if (units >= UPGRADE_AT[1]) return 2;
+// 等级推导:攒满当前等级的生产上限即升级(阈值 = 各等级上限 × 类型倍率,所以所有塔都能自产升满)
+export function levelOf(units: number, kind: TowerKind): number {
+  const capMul = KIND_MODS[kind].capMul;
+  if (units >= LEVEL_STATS[2].cap * capMul) return 3;
+  if (units >= LEVEL_STATS[1].cap * capMul) return 2;
   return 1;
+}
+
+// 塔的实际兵力上限(等级上限 × 类型倍率)
+export function capOf(t: Tower): number {
+  return LEVEL_STATS[t.level].cap * KIND_MODS[t.kind].capMul;
 }
 
 export interface TowerInit {
@@ -131,7 +136,7 @@ export function createGame(levelIndex: number, defs: TowerInit[], edges: [number
       owner: d.owner,
       kind: d.kind ?? 'normal',
       units: d.units,
-      level: levelOf(d.units),
+      level: levelOf(d.units, d.kind ?? 'normal'),
       prodAcc: 0,
       ap: AP_MAX,
     })),
@@ -169,7 +174,7 @@ export function transformTower(state: GameState, id: number, kind: TowerKind): b
   t.units -= TRANSFORM_COST_UNITS;
   t.ap -= TRANSFORM_COST_AP;
   t.kind = kind;
-  t.level = levelOf(t.units);
+  t.level = levelOf(t.units, t.kind);
   return true;
 }
 
@@ -191,7 +196,7 @@ export function sendUnits(state: GameState, fromId: number, toId: number): boole
   if (count < 1) return false;
   from.units -= count;
   from.ap -= SEND_COST;
-  from.level = levelOf(from.units);
+  from.level = levelOf(from.units, from.kind);
   const dist = Math.hypot(to.x - from.x, to.y - from.y);
   state.squads.push({
     id: state.nextSquadId++,
@@ -225,7 +230,7 @@ function arrive(state: GameState, squad: Squad): void {
       t.prodAcc = 0;
     }
   }
-  t.level = levelOf(t.units);
+  t.level = levelOf(t.units, t.kind);
 }
 
 // 某势力的总兵力(塔 + 行军队伍)
@@ -410,7 +415,7 @@ export function update(state: GameState, dt: number): void {
     if (n > 0) {
       t.prodAcc -= n;
       t.units = Math.min(cap, t.units + n);
-      t.level = levelOf(t.units);
+      t.level = levelOf(t.units, t.kind);
     }
   }
 

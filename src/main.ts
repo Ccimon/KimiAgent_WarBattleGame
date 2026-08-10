@@ -260,7 +260,7 @@ function applySnapshot(snap: Snapshot): void {
     t.units = snap.towers[i].units;
     t.ap = snap.towers[i].ap;
     t.kind = snap.towers[i].kind; // 转型会改类型,同步给客人端
-    t.level = levelOf(t.units);
+    t.level = levelOf(t.units, t.kind);
   }
   // 队伍按快照重建位置;本地已推进的取较大值避免回跳
   const local = new Map(state.squads.map((s) => [s.id, s.travelled]));

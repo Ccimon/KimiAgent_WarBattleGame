@@ -178,6 +178,7 @@
       }
       #transform-menu button:hover:not(:disabled) { background: #475569; }
       #transform-menu button:disabled { opacity: 0.4; cursor: not-allowed; }
+      #transform-menu button small { font-size: 10px; color: #94a3b8; }
     </style>
   </head>
   <body>
@@ -202,10 +203,10 @@
       </div>
       <div id="tip">从己方蓝色塔按住拖动到目标塔,松开派出一半兵力</div>
       <div id="transform-menu">
-        <button data-kind="fortress">堡垒</button>
-        <button data-kind="barracks">兵营</button>
-        <button data-kind="watch">哨塔</button>
-        <button data-kind="mine">矿塔</button>
+        <button data-kind="fortress">堡垒<br /><small>守强攻慢</small></button>
+        <button data-kind="barracks">兵营<br /><small>产速×2 上限略减</small></button>
+        <button data-kind="watch">哨塔<br /><small>行动力回复×2</small></button>
+        <button data-kind="mine">矿塔<br /><small>不产兵 邻塔产速+50%</small></button>
       </div>
       <div id="lobby" class="show">
         <div class="panel">
