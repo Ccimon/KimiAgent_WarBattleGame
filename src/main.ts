@@ -4,9 +4,12 @@ import {
   levelOf,
   sendUnits,
   towerAt,
+  transformTower,
   update,
   SQUAD_SPEED,
   SEND_COST,
+  TRANSFORM_COST_UNITS,
+  TRANSFORM_COST_AP,
   type GameState,
   type Owner,
 } from './game';
@@ -47,7 +50,7 @@ let mode: Mode = 'solo';
 let myFaction: Owner = 'player';
 let levelIndex = 0;
 let state: GameState = createGame(0, LEVELS[0].towers, LEVELS[0].edges); // 开场背景
-const drag: DragState = { fromId: null, x: 0, y: 0 };
+const drag: DragState = { fromId: null, x: 0, y: 0, moved: false };
 
 let host: HostHandle | null = null;
 let guest: GuestHandle | null = null;
@@ -131,6 +134,11 @@ document.querySelector('#btn-host')!.addEventListener('click', () => {
       // 客人指令:校验出发塔属于红方再执行
       if (mode !== 'host' || state.phase !== 'playing') return;
       if (state.towers[from]?.owner === 'ai1') sendUnits(state, from, to);
+    },
+    onTransform(tower, kind) {
+      // 客人转型指令:校验塔属于红方再执行(资源/类型校验在 transformTower 内)
+      if (mode !== 'host' || state.phase !== 'playing') return;
+      if (state.towers[tower]?.owner === 'ai1') transformTower(state, tower, kind);
     },
     onGuestLeave() {
       if (mode === 'host' && state.phase === 'playing') {
@@ -228,7 +236,7 @@ startBtn.addEventListener('click', () => {
 function buildSnapshot(): Snapshot {
   return {
     t: 'snap',
-    towers: state.towers.map((t) => ({ owner: t.owner, units: t.units, ap: t.ap })),
+    towers: state.towers.map((t) => ({ owner: t.owner, units: t.units, ap: t.ap, kind: t.kind })),
     squads: state.squads.map((s) => ({
       id: s.id,
       owner: s.owner,
@@ -249,6 +257,7 @@ function applySnapshot(snap: Snapshot): void {
     t.owner = snap.towers[i].owner;
     t.units = snap.towers[i].units;
     t.ap = snap.towers[i].ap;
+    t.kind = snap.towers[i].kind; // 转型会改类型,同步给客人端
     t.level = levelOf(t.units);
   }
   // 队伍按快照重建位置;本地已推进的取较大值避免回跳
@@ -293,6 +302,7 @@ function applySnapshot(snap: Snapshot): void {
 // ---------- 输入 ----------
 
 canvas.addEventListener('pointerdown', (e) => {
+  closeTransformMenu();
   if (lobbyEl.classList.contains('show') || state.phase !== 'playing') return;
   if (guestEliminated) return;
   const p = toLogical(e);
@@ -301,6 +311,7 @@ canvas.addEventListener('pointerdown', (e) => {
     drag.fromId = t.id;
     drag.x = p.x;
     drag.y = p.y;
+    drag.moved = false;
     canvas.setPointerCapture(e.pointerId);
   }
 });
@@ -308,6 +319,7 @@ canvas.addEventListener('pointerdown', (e) => {
 canvas.addEventListener('pointermove', (e) => {
   if (drag.fromId === null) return;
   const p = toLogical(e);
+  if (Math.hypot(p.x - drag.x, p.y - drag.y) > 8) drag.moved = true; // 拖出死区才算出兵
   drag.x = p.x;
   drag.y = p.y;
 });
@@ -323,9 +335,49 @@ canvas.addEventListener('pointerup', (e) => {
     } else {
       sendUnits(state, drag.fromId, target.id);
     }
+  } else if (!drag.moved) {
+    // 原地松开(未拖动)= 打开转型菜单
+    const from = state.towers[drag.fromId];
+    if (from.kind === 'normal') openTransformMenu(from.id);
   }
   drag.fromId = null;
+  drag.moved = false;
 });
+
+// ---------- 塔转型菜单 ----------
+
+const transformMenuEl = document.querySelector<HTMLDivElement>('#transform-menu')!;
+let transformTarget: number | null = null;
+
+function openTransformMenu(towerId: number): void {
+  const t = state.towers[towerId];
+  transformTarget = towerId;
+  // 逻辑坐标 -> #app 内百分比定位,放在塔上方并防止越界
+  const left = Math.min(Math.max((t.x / LOGICAL_W) * 100, 8), 70);
+  const top = Math.min(Math.max(((t.y - 70) / LOGICAL_H) * 100, 2), 80);
+  transformMenuEl.style.left = `${left}%`;
+  transformMenuEl.style.top = `${top}%`;
+  // 资源不足的类型禁用
+  for (const btn of transformMenuEl.querySelectorAll<HTMLButtonElement>('button')) {
+    btn.disabled = t.units < TRANSFORM_COST_UNITS || t.ap < TRANSFORM_COST_AP;
+  }
+  transformMenuEl.classList.add('show');
+}
+
+function closeTransformMenu(): void {
+  transformMenuEl.classList.remove('show');
+  transformTarget = null;
+}
+
+for (const btn of transformMenuEl.querySelectorAll<HTMLButtonElement>('button')) {
+  btn.addEventListener('click', () => {
+    if (transformTarget === null) return;
+    const kind = btn.dataset.kind as 'fortress' | 'barracks' | 'watch' | 'mine';
+    if (mode === 'guest') guest?.sendTransform(transformTarget, kind);
+    else transformTower(state, transformTarget, kind);
+    closeTransformMenu();
+  });
+}
 
 canvas.addEventListener('pointercancel', () => {
   drag.fromId = null;

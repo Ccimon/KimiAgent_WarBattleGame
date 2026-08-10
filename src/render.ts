@@ -1,4 +1,4 @@
-import type { GameState, Owner } from './game';
+import type { GameState, Owner, TowerKind } from './game';
 import { TOWER_RADIUS, hasEdge, AP_MAX, SEND_COST } from './game';
 
 export const COLORS: Record<Owner, string> = {
@@ -19,6 +19,30 @@ export interface DragState {
   fromId: number | null;
   x: number;
   y: number;
+  moved: boolean; // 是否拖出了死区(原地松开=打开转型菜单)
+}
+
+// 按塔类型描外形路径:普通圆形、堡垒方形、兵营三角、哨塔菱形、矿塔六边形
+function traceShape(ctx: CanvasRenderingContext2D, kind: TowerKind, x: number, y: number, r: number): void {
+  ctx.beginPath();
+  if (kind === 'fortress') {
+    ctx.rect(x - r * 0.85, y - r * 0.85, r * 1.7, r * 1.7);
+    return;
+  }
+  const sides = kind === 'barracks' ? 3 : kind === 'watch' ? 4 : kind === 'mine' ? 6 : 0;
+  if (sides === 0) {
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    return;
+  }
+  const start = -Math.PI / 2; // 顶点朝上
+  for (let i = 0; i < sides; i++) {
+    const a = start + (i * 2 * Math.PI) / sides;
+    const px = x + r * Math.cos(a);
+    const py = y + r * Math.sin(a);
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
 }
 
 function drawTower(
@@ -30,14 +54,12 @@ function drawTower(
   const t = state.towers[id];
   const color = COLORS[t.owner];
 
-  // 底座
-  ctx.beginPath();
-  ctx.arc(t.x, t.y, TOWER_RADIUS, 0, Math.PI * 2);
+  // 底座(外形按塔类型,颜色按势力)
+  traceShape(ctx, t.kind, t.x, t.y, TOWER_RADIUS);
   ctx.fillStyle = COLORS_DARK[t.owner];
   ctx.fill();
 
-  ctx.beginPath();
-  ctx.arc(t.x, t.y, TOWER_RADIUS - 5, 0, Math.PI * 2);
+  traceShape(ctx, t.kind, t.x, t.y, TOWER_RADIUS - 5);
   ctx.fillStyle = color;
   ctx.fill();
 

@@ -1,7 +1,7 @@
 // P2P 联机层:PeerJS 公共云做信令,游戏数据走 WebRTC DataChannel 直连
 // 房主权威:房主跑游戏逻辑并广播快照,客人只发出兵指令
 import Peer, { type DataConnection } from 'peerjs';
-import type { Owner, Phase } from './game';
+import type { Owner, Phase, TowerKind } from './game';
 
 export interface SnapSquad {
   id: number;
@@ -15,13 +15,15 @@ export interface SnapSquad {
 
 export interface Snapshot {
   t: 'snap';
-  towers: { owner: Owner; units: number; ap: number }[];
+  towers: { owner: Owner; units: number; ap: number; kind: TowerKind }[];
   squads: SnapSquad[];
   phase: Phase;
 }
 
 export type HostMsg = { t: 'start'; levelIndex: number } | Snapshot;
-export type GuestMsg = { t: 'cmd'; from: number; to: number };
+export type GuestMsg =
+  | { t: 'cmd'; from: number; to: number }
+  | { t: 'transform'; tower: number; kind: TowerKind };
 
 const ID_PREFIX = 'tower-battle-';
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 去掉易混淆字符
@@ -61,6 +63,7 @@ export interface HostCallbacks {
   onReady: (code: string) => void; // 房间创建成功,展示房间码
   onGuestJoin: () => void;
   onCmd: (from: number, to: number) => void;
+  onTransform: (tower: number, kind: TowerKind) => void;
   onGuestLeave: () => void;
   onError: (msg: string) => void;
 }
@@ -85,6 +88,7 @@ export function hostRoom(cbs: HostCallbacks): HostHandle {
       c.on('data', (data) => {
         const m = data as GuestMsg;
         if (m.t === 'cmd') cbs.onCmd(m.from, m.to);
+        else if (m.t === 'transform') cbs.onTransform(m.tower, m.kind);
       });
       c.on('close', () => {
         conn = null;
@@ -134,6 +138,7 @@ export interface GuestCallbacks {
 
 export interface GuestHandle {
   sendCmd(from: number, to: number): void;
+  sendTransform(tower: number, kind: TowerKind): void;
   destroy(): void;
 }
 
@@ -178,6 +183,9 @@ export function joinRoom(code: string, cbs: GuestCallbacks): GuestHandle {
   return {
     sendCmd(from, to) {
       if (conn?.open) conn.send({ t: 'cmd', from, to } satisfies GuestMsg);
+    },
+    sendTransform(tower, kind) {
+      if (conn?.open) conn.send({ t: 'transform', tower, kind } satisfies GuestMsg);
     },
     destroy() {
       clearTimeout(timer);

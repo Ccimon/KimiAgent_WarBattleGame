@@ -154,6 +154,29 @@
       #lobby .lvl-row { display: flex; gap: 10px; align-items: center; font-size: 14px; }
       #lobby .lvl-row button { padding: 4px 12px; font-size: 14px; }
       #hud.hidden { display: none; }
+      #transform-menu {
+        position: absolute;
+        display: none;
+        gap: 6px;
+        background: rgba(15, 23, 42, 0.92);
+        border: 1px solid #475569;
+        border-radius: 10px;
+        padding: 8px;
+        z-index: 20;
+      }
+      #transform-menu.show { display: flex; }
+      #transform-menu button {
+        background: #334155;
+        color: #e2e8f0;
+        border: 1px solid #475569;
+        border-radius: 8px;
+        padding: 6px 10px;
+        font-size: 12px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      #transform-menu button:hover:not(:disabled) { background: #475569; }
+      #transform-menu button:disabled { opacity: 0.4; cursor: not-allowed; }
     </style>
   </head>
   <body>
@@ -177,6 +200,12 @@
         </div>
       </div>
       <div id="tip">从己方蓝色塔按住拖动到目标塔,松开派出一半兵力</div>
+      <div id="transform-menu">
+        <button data-kind="fortress">堡垒</button>
+        <button data-kind="barracks">兵营</button>
+        <button data-kind="watch">哨塔</button>
+        <button data-kind="mine">矿塔</button>
+      </div>
       <div id="lobby" class="show">
         <div class="panel">
           <h1>Tower Battle</h1>

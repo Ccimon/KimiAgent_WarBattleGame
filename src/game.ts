@@ -1,10 +1,14 @@
 export type Owner = 'player' | 'ai1' | 'ai2' | 'neutral';
 
+// 塔类型(设计见 docs/塔类型设计.md),类型是塔的固有属性,易主不改变
+export type TowerKind = 'normal' | 'fortress' | 'barracks' | 'watch' | 'mine';
+
 export interface Tower {
   id: number;
   x: number;
   y: number;
   owner: Owner;
+  kind: TowerKind;
   units: number;
   level: number; // 1-3,由兵力阈值推导
   prodAcc: number; // 产兵累积器
@@ -62,6 +66,8 @@ export const SQUAD_SPEED = 110; // 像素/秒(导出供联机客人端平滑推�
 export const AP_MAX = 100; // 行动力上限
 export const SEND_COST = 34; // 每次出兵固定消耗(满 AP 约可连续出兵 3 次)
 export const AP_REGEN = 8; // 行动力每秒回复(约 4.25 秒回够一次出兵)
+export const TRANSFORM_COST_UNITS = 15; // 转型消耗兵力
+export const TRANSFORM_COST_AP = 50; // 转型消耗行动力
 const CONTACT_RANGE = 16; // 同一条边上位置差小于此值判定遭遇(像素)
 const FIGHT_RATE = 8; // 遭遇战交换速度:每秒双方各掉 8 兵(1:1)
 const AI_FACTIONS: Owner[] = ['ai1', 'ai2'];
@@ -83,6 +89,16 @@ const LEVEL_STATS: Record<number, { rate: number; cap: number }> = {
   3: { rate: 1.6, cap: 60 },
 };
 
+// 塔类型修正:产速/上限倍率、守方减伤(来袭有效兵力折扣)、AP 回复倍率
+const KIND_MODS: Record<TowerKind, { prodMul: number; capMul: number; defMul: number; apMul: number }> = {
+  normal: { prodMul: 1, capMul: 1, defMul: 1, apMul: 1 },
+  fortress: { prodMul: 0.5, capMul: 1, defMul: 0.75, apMul: 1 }, // 守战减伤 25%,产兵慢
+  barracks: { prodMul: 2, capMul: 0.5, defMul: 1, apMul: 1 }, // 造血快但囤不住
+  watch: { prodMul: 1, capMul: 1, defMul: 1, apMul: 2 }, // 指挥中枢,AP 回复快
+  mine: { prodMul: 0, capMul: 1, defMul: 1, apMul: 1 }, // 不产兵,光环见 MINE_AURA
+};
+const MINE_AURA = 0.5; // 每座相邻己方矿塔为产速加成 +50%(可叠加)
+
 const UPGRADE_AT = [35, 15]; // units >= 35 -> 3 级, >= 15 -> 2 级
 
 export function levelOf(units: number): number {
@@ -96,6 +112,7 @@ export interface TowerInit {
   y: number;
   owner: Owner;
   units: number;
+  kind?: TowerKind; // 默认普通塔
 }
 
 export function createGame(levelIndex: number, defs: TowerInit[], edges: [number, number][]): GameState {
@@ -112,6 +129,7 @@ export function createGame(levelIndex: number, defs: TowerInit[], edges: [number
       x: d.x,
       y: d.y,
       owner: d.owner,
+      kind: d.kind ?? 'normal',
       units: d.units,
       level: levelOf(d.units),
       prodAcc: 0,
@@ -140,6 +158,19 @@ export function assignAi(state: GameState, faction: Owner): void {
   const p = AI_PERSONALITIES[Math.floor(Math.random() * AI_PERSONALITIES.length)];
   state.aiTraits[faction] = p;
   state.aiTimers[faction] = p.interval;
+}
+
+// 塔转型:己方普通塔消耗兵力+AP 变为指定类型(单向);资源不足或已转型则失败
+export function transformTower(state: GameState, id: number, kind: TowerKind): boolean {
+  const t = state.towers[id];
+  if (!t || t.kind !== 'normal' || kind === 'normal') return false;
+  if (!['fortress', 'barracks', 'watch', 'mine'].includes(kind)) return false;
+  if (t.units < TRANSFORM_COST_UNITS || t.ap < TRANSFORM_COST_AP) return false;
+  t.units -= TRANSFORM_COST_UNITS;
+  t.ap -= TRANSFORM_COST_AP;
+  t.kind = kind;
+  t.level = levelOf(t.units);
+  return true;
 }
 
 export function towerAt(state: GameState, x: number, y: number): Tower | null {
@@ -186,7 +217,8 @@ function arrive(state: GameState, squad: Squad): void {
   if (t.owner === squad.owner) {
     t.units += squad.count;
   } else {
-    t.units -= squad.count;
+    // 堡垒类守方减伤:来袭队伍有效兵力打折(只作用于到达结算,路上遭遇战不受影响)
+    t.units -= squad.count * KIND_MODS[t.kind].defMul;
     if (t.units < 0) {
       t.owner = squad.owner;
       t.units = -t.units;
@@ -314,9 +346,9 @@ function doAttack(state: GameState, faction: Owner, trait: Personality, busy: Se
   // 道路约束下每座塔独立选目标:优先打邻接的"目标势力"塔,否则打最弱的邻接敌塔
   for (const t of state.towers) {
     if (t.owner !== faction || busy.has(t.id)) continue;
-    // 蓄到接近满员再倾巢进攻:多塔兵力叠加才能压过守方的生产恢复
+    // 蓄到接近满员再倾巢进攻:多塔兵力叠加才能压过守方的生产恢复(上限按塔类型修正)
     if (t.units < trait.minUnits) continue;
-    if (t.units < LEVEL_STATS[t.level].cap * trait.attackFull) continue;
+    if (t.units < LEVEL_STATS[t.level].cap * KIND_MODS[t.kind].capMul * trait.attackFull) continue;
     const adjacent = foes.filter((f) => hasEdge(state, t.id, f.id));
     if (adjacent.length === 0) continue;
     const preferred =
@@ -356,21 +388,28 @@ export function update(state: GameState, dt: number): void {
   if (state.phase !== 'playing') return;
   state.time += dt;
 
-  // 行动力回复(中立塔也回,简化逻辑;只有主动出兵才消耗)
+  // 行动力回复(中立塔也回,简化逻辑;哨塔回复更快;只有主动出兵才消耗)
   for (const t of state.towers) {
-    t.ap = Math.min(AP_MAX, t.ap + AP_REGEN * dt);
+    t.ap = Math.min(AP_MAX, t.ap + AP_REGEN * KIND_MODS[t.kind].apMul * dt);
   }
 
-  // 产兵(中立塔不产兵,到达上限后停止)
+  // 产兵(中立塔与矿塔不产兵,到达上限后停止;矿塔为相邻己方塔提供产速光环)
   for (const t of state.towers) {
     if (t.owner === 'neutral') continue;
+    const mods = KIND_MODS[t.kind];
+    if (mods.prodMul === 0) continue;
     const stats = LEVEL_STATS[t.level];
-    if (t.units >= stats.cap) continue;
-    t.prodAcc += stats.rate * dt;
+    const cap = stats.cap * mods.capMul;
+    if (t.units >= cap) continue;
+    let mines = 0;
+    for (const o of state.towers) {
+      if (o.kind === 'mine' && o.owner === t.owner && hasEdge(state, o.id, t.id)) mines++;
+    }
+    t.prodAcc += stats.rate * mods.prodMul * (1 + mines * MINE_AURA) * dt;
     const n = Math.floor(t.prodAcc);
     if (n > 0) {
       t.prodAcc -= n;
-      t.units = Math.min(stats.cap, t.units + n);
+      t.units = Math.min(cap, t.units + n);
       t.level = levelOf(t.units);
     }
   }
