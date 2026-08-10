@@ -134,24 +134,30 @@ function drawSquad(ctx: CanvasRenderingContext2D, state: GameState, s: (typeof s
   }
 }
 
-export function draw(ctx: CanvasRenderingContext2D, state: GameState, drag: DragState): void {
+export function draw(
+  ctx: CanvasRenderingContext2D,
+  state: GameState,
+  drag: DragState,
+  w = 960,
+  h = 600,
+): void {
   // 背景
   ctx.fillStyle = '#1e293b';
-  ctx.fillRect(0, 0, 960, 600);
+  ctx.fillRect(0, 0, w, h);
 
   // 背景网格
   ctx.strokeStyle = '#33415555';
   ctx.lineWidth = 1;
-  for (let x = 0; x <= 960; x += 48) {
+  for (let x = 0; x <= w; x += 48) {
     ctx.beginPath();
     ctx.moveTo(x, 0);
-    ctx.lineTo(x, 600);
+    ctx.lineTo(x, h);
     ctx.stroke();
   }
-  for (let y = 0; y <= 600; y += 48) {
+  for (let y = 0; y <= h; y += 48) {
     ctx.beginPath();
     ctx.moveTo(0, y);
-    ctx.lineTo(960, y);
+    ctx.lineTo(w, y);
     ctx.stroke();
   }
 

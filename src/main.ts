@@ -13,15 +13,20 @@ import {
   type GameState,
   type Owner,
 } from './game';
-import { LEVELS } from './levels';
+import { LEVELS, toPortrait } from './levels';
 import { draw, type DragState } from './render';
 import { hostRoom, joinRoom, type GuestHandle, type HostHandle, type Snapshot } from './net';
 import { VERSION } from './version';
 
-const LOGICAL_W = 960;
-const LOGICAL_H = 600;
+// 逻辑画布尺寸:横屏 960x600,竖屏 600x960(关卡按横版设计,竖屏由 toPortrait 转置)
+let LOGICAL_W = 960;
+let LOGICAL_H = 600;
 const SNAP_INTERVAL = 0.1; // 房主快照广播间隔(秒)
 const NET_LEVELS = [3, 4, 5]; // 联机可选关卡(三方会战)
+
+function isPortrait(): boolean {
+  return window.innerHeight > window.innerWidth;
+}
 
 const canvas = document.querySelector<HTMLCanvasElement>('#game')!;
 const ctx = canvas.getContext('2d')!;
@@ -62,8 +67,9 @@ let guestEliminated = false;
 
 function loadLevel(index: number): GameState {
   levelIndex = ((index % LEVELS.length) + LEVELS.length) % LEVELS.length;
-  const def = LEVELS[levelIndex];
-  levelNameEl.textContent = def.name;
+  const raw = LEVELS[levelIndex];
+  const def = isPortrait() ? toPortrait(raw) : raw; // 竖屏时整体转置布局
+  levelNameEl.textContent = raw.name;
   overlayEl.classList.remove('show');
   overlayShown = false;
   return createGame(levelIndex, def.towers, def.edges);
@@ -78,6 +84,17 @@ function loadNetLevel(index: number): GameState {
 }
 
 function resize(): void {
+  // 横竖屏切换:更新逻辑尺寸并重载当前关(布局随朝向转置,对局会重置)
+  const w = isPortrait() ? 600 : 960;
+  const h = isPortrait() ? 960 : 600;
+  if (w !== LOGICAL_W) {
+    LOGICAL_W = w;
+    LOGICAL_H = h;
+    if (!lobbyEl.classList.contains('show')) {
+      state = mode === 'host' ? loadNetLevel(levelIndex) : loadLevel(levelIndex);
+      if (mode === 'host') host?.send({ t: 'start', levelIndex });
+    }
+  }
   const rect = canvas.getBoundingClientRect();
   const dpr = window.devicePixelRatio || 1;
   canvas.width = Math.round(rect.width * dpr);
@@ -466,7 +483,7 @@ function frame(now: number): void {
 
   const scale = Math.min(canvas.width / LOGICAL_W, canvas.height / LOGICAL_H);
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
-  draw(ctx, state, drag);
+  draw(ctx, state, drag, LOGICAL_W, LOGICAL_H);
 
   requestAnimationFrame(frame);
 }

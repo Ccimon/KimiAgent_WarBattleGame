@@ -6,6 +6,15 @@ export interface LevelDef {
   edges: [number, number][]; // 道路:塔下标对(无向),只能沿边派兵
 }
 
+// 竖屏布局:坐标 x/y 互换(保距变换),关卡只需按横版 960x600 设计一次,竖屏自动转置
+export function toPortrait(def: LevelDef): LevelDef {
+  return {
+    name: def.name,
+    edges: def.edges,
+    towers: def.towers.map((t) => ({ ...t, x: t.y, y: t.x })),
+  };
+}
+
 // 塔类型:普通(默认不标)/fortress 堡垒/barracks 兵营/watch 哨塔/mine 矿塔,设计见 docs/塔类型设计.md
 // 逻辑画布 960x600
 export const LEVELS: LevelDef[] = [
