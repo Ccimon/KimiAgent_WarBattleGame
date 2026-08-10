@@ -118,6 +118,7 @@
         min-width: 320px;
       }
       #lobby h1 { font-size: 26px; margin-bottom: 6px; }
+      #lobby h1 .ver { font-size: 13px; color: #64748b; font-weight: 400; margin-left: 8px; }
       #lobby button {
         background: #3b82f6;
         color: #fff;
@@ -208,7 +209,7 @@
       </div>
       <div id="lobby" class="show">
         <div class="panel">
-          <h1>Tower Battle</h1>
+          <h1>Tower Battle<span class="ver" id="app-version"></span></h1>
           <div id="lobby-menu" style="display:flex;flex-direction:column;gap:12px;align-items:center">
             <button id="btn-solo">单机开始</button>
             <button id="btn-host" class="secondary">创建联机房间</button>

@@ -16,6 +16,7 @@ import {
 import { LEVELS } from './levels';
 import { draw, type DragState } from './render';
 import { hostRoom, joinRoom, type GuestHandle, type HostHandle, type Snapshot } from './net';
+import { VERSION } from './version';
 
 const LOGICAL_W = 960;
 const LOGICAL_H = 600;
@@ -31,6 +32,7 @@ const overlayNextBtn = document.querySelector<HTMLButtonElement>('#btn-overlay-n
 const overlayRestartBtn = document.querySelector<HTMLButtonElement>('#btn-overlay-restart')!;
 const tipEl = document.querySelector<HTMLDivElement>('#tip')!;
 const hudEl = document.querySelector<HTMLDivElement>('#hud')!;
+document.querySelector<HTMLSpanElement>('#app-version')!.textContent = `v${VERSION}`;
 
 // 大厅元素
 const lobbyEl = document.querySelector<HTMLDivElement>('#lobby')!;

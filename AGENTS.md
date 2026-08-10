@@ -29,6 +29,7 @@ Tower Battle(连线塔战):一个 2D 塔防策略小游戏,支持单机和 P2P �
 - `target` ES2020,ESM(`"type": "module"`),`moduleResolution: "bundler"`,允许 import 带 `.ts` 扩展名(项目内 import 均不带扩展名)。
 - 函数短小、具名常量集中定义在文件顶部(如 `SQUAD_SPEED`、`AI_INTERVAL`、`LEVEL_STATS`),调数值优先改这些常量。
 - 注释与 UI 文案使用简体中文,遵循现有注释密度(关键逻辑行内注释,不写冗余文档)。
+- **版本号约定**:`src/version.ts` 的 `VERSION` 是版本号唯一来源,显示在大厅标题栏;**每次推送 Git 前必须递增**(patch 位,如 0.2.0 → 0.2.1),并在提交前确认已升级。
 
 ## 测试
 
