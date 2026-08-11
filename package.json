@@ -6,9 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "sim": "tsx sim/simulate.ts"
   },
   "devDependencies": {
+    "@types/node": "^26.2.0",
+    "tsx": "^4.23.12",
     "typescript": "^5.5.4",
     "vite": "^5.4.8"
   },

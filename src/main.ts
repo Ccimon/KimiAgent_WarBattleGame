@@ -6,16 +6,24 @@ import {
   towerAt,
   transformTower,
   update,
-  SQUAD_SPEED,
-  SEND_COST,
-  TRANSFORM_COST_UNITS,
-  TRANSFORM_COST_AP,
   type GameState,
   type Owner,
 } from './game';
-import { LEVELS, toPortrait } from './levels';
+import { CONFIG } from './config';
+import { LEVELS, toPortrait, type LevelDef } from './levels';
 import { draw, type DragState } from './render';
 import { hostRoom, joinRoom, type GuestHandle, type HostHandle, type Snapshot } from './net';
+import {
+  initEditor,
+  enterEditor,
+  editorOnResize,
+  editorPointerDown,
+  editorPointerMove,
+  editorPointerUp,
+  editorState,
+  editorDraw,
+} from './editor';
+import { initTuning } from './tuning';
 import { VERSION } from './version';
 
 // 逻辑画布尺寸:横屏 960x600,竖屏 600x960(关卡按横版设计,竖屏由 toPortrait 转置)
@@ -51,13 +59,14 @@ const lobbyLvlRow = document.querySelector<HTMLDivElement>('#lobby-lvl-row')!;
 const lobbyLevelEl = document.querySelector<HTMLSpanElement>('#lobby-level')!;
 const startBtn = document.querySelector<HTMLButtonElement>('#btn-start')!;
 
-type Mode = 'solo' | 'host' | 'guest';
+type Mode = 'solo' | 'host' | 'guest' | 'editor';
 
 let mode: Mode = 'solo';
 let myFaction: Owner = 'player';
 let levelIndex = 0;
 let state: GameState = createGame(0, LEVELS[0].towers, LEVELS[0].edges); // 开场背景
 const drag: DragState = { fromId: null, x: 0, y: 0, moved: false };
+let playtestDef: LevelDef | null = null; // 编辑器试玩中的自定义关卡(非空则替代正常关卡流转)
 
 let host: HostHandle | null = null;
 let guest: GuestHandle | null = null;
@@ -83,6 +92,32 @@ function loadNetLevel(index: number): GameState {
   return s;
 }
 
+// 编辑器试玩:用编辑中的关卡开一局 solo(工作副本保留在 editor 模块,随时可返回继续编辑)
+function startPlaytest(def: LevelDef): void {
+  playtestDef = def;
+  mode = 'solo';
+  myFaction = 'player';
+  const d = isPortrait() ? toPortrait(def) : def;
+  levelNameEl.textContent = def.name;
+  overlayEl.classList.remove('show');
+  overlayShown = false;
+  hudEl.classList.remove('hidden');
+  state = createGame(-1, d.towers, d.edges);
+  setHudForMode();
+  defaultTip();
+}
+
+// 返回编辑器(试玩结束或中途返回,编辑内容不丢)
+function backToEditor(): void {
+  playtestDef = null;
+  mode = 'editor';
+  hudEl.classList.add('hidden');
+  overlayEl.classList.remove('show');
+  overlayShown = false;
+  enterEditor();
+  setTip('编辑器:选择拖动移塔,加塔/连线/删除用工具栏,导出代码贴回 levels.ts');
+}
+
 function resize(): void {
   // 横竖屏切换:更新逻辑尺寸并重载当前关(布局随朝向转置,对局会重置)
   const w = isPortrait() ? 600 : 960;
@@ -90,7 +125,11 @@ function resize(): void {
   if (w !== LOGICAL_W) {
     LOGICAL_W = w;
     LOGICAL_H = h;
-    if (!lobbyEl.classList.contains('show')) {
+    if (mode === 'editor') {
+      editorOnResize(); // 编辑器只重建显示状态,编辑数据不受影响
+    } else if (playtestDef) {
+      startPlaytest(playtestDef);
+    } else if (!lobbyEl.classList.contains('show')) {
       state = mode === 'host' ? loadNetLevel(levelIndex) : loadLevel(levelIndex);
       if (mode === 'host') host?.send({ t: 'start', levelIndex });
     }
@@ -124,13 +163,33 @@ function lobbyError(msg: string): void {
   lobbyErrorEl.textContent = msg;
 }
 
+// 玩法说明浮层(大厅标题旁的问号按钮)
+const helpPanelEl = document.querySelector<HTMLDivElement>('#help-panel')!;
+document.querySelector('#btn-help')!.addEventListener('click', () => {
+  helpPanelEl.classList.add('show');
+});
+document.querySelector('#btn-help-close')!.addEventListener('click', () => {
+  helpPanelEl.classList.remove('show');
+});
+
 document.querySelector('#btn-solo')!.addEventListener('click', () => {
   mode = 'solo';
   myFaction = 'player';
+  playtestDef = null;
   lobbyEl.classList.remove('show');
   hudEl.classList.remove('hidden');
+  setHudForMode();
   state = loadLevel(0);
   defaultTip();
+});
+
+// 关卡编辑器入口(设计见 docs/编辑器设计.md)
+document.querySelector('#btn-editor')!.addEventListener('click', () => {
+  mode = 'editor';
+  lobbyEl.classList.remove('show');
+  hudEl.classList.add('hidden');
+  enterEditor();
+  setTip('编辑器:选择拖动移塔,加塔/连线/删除用工具栏,导出代码贴回 levels.ts');
 });
 
 document.querySelector('#btn-host')!.addEventListener('click', () => {
@@ -217,10 +276,13 @@ document.querySelector('#btn-join')!.addEventListener('click', () => {
 });
 
 function setHudForMode(): void {
-  const isGuest = mode === 'guest';
-  document.querySelector<HTMLButtonElement>('#btn-prev')!.style.display = isGuest ? 'none' : '';
-  document.querySelector<HTMLButtonElement>('#btn-next')!.style.display = isGuest ? 'none' : '';
-  document.querySelector<HTMLButtonElement>('#btn-restart')!.style.display = isGuest ? 'none' : '';
+  const limited = mode === 'guest' || playtestDef !== null; // 客人与试玩都没有关卡流转按钮
+  document.querySelector<HTMLButtonElement>('#btn-prev')!.style.display = limited ? 'none' : '';
+  document.querySelector<HTMLButtonElement>('#btn-next')!.style.display = limited ? 'none' : '';
+  document.querySelector<HTMLButtonElement>('#btn-restart')!.style.display =
+    mode === 'guest' ? 'none' : '';
+  document.querySelector<HTMLButtonElement>('#btn-back-editor')!.style.display =
+    playtestDef !== null ? '' : 'none';
 }
 
 // 房主大厅选关(仅三方关卡)
@@ -322,6 +384,11 @@ function applySnapshot(snap: Snapshot): void {
 
 canvas.addEventListener('pointerdown', (e) => {
   closeTransformMenu();
+  if (mode === 'editor') {
+    editorPointerDown(toLogical(e));
+    canvas.setPointerCapture(e.pointerId);
+    return;
+  }
   if (lobbyEl.classList.contains('show') || state.phase !== 'playing') return;
   if (guestEliminated) return;
   const p = toLogical(e);
@@ -336,6 +403,10 @@ canvas.addEventListener('pointerdown', (e) => {
 });
 
 canvas.addEventListener('pointermove', (e) => {
+  if (mode === 'editor') {
+    editorPointerMove(toLogical(e));
+    return;
+  }
   if (drag.fromId === null) return;
   const p = toLogical(e);
   if (Math.hypot(p.x - drag.x, p.y - drag.y) > 8) drag.moved = true; // 拖出死区才算出兵
@@ -344,13 +415,17 @@ canvas.addEventListener('pointermove', (e) => {
 });
 
 canvas.addEventListener('pointerup', (e) => {
+  if (mode === 'editor') {
+    editorPointerUp(toLogical(e));
+    return;
+  }
   if (drag.fromId === null) return;
   const p = toLogical(e);
   const target = towerAt(state, p.x, p.y);
   if (target && target.id !== drag.fromId) {
     if (mode === 'guest') {
       // 本地预判行动力,不足就不发(房主端仍会最终校验)
-      if (state.towers[drag.fromId].ap >= SEND_COST) guest?.sendCmd(drag.fromId, target.id);
+      if (state.towers[drag.fromId].ap >= CONFIG.sendCost) guest?.sendCmd(drag.fromId, target.id);
     } else {
       sendUnits(state, drag.fromId, target.id);
     }
@@ -378,7 +453,7 @@ function openTransformMenu(towerId: number): void {
   transformMenuEl.style.top = `${top}%`;
   // 资源不足的类型禁用
   for (const btn of transformMenuEl.querySelectorAll<HTMLButtonElement>('button')) {
-    btn.disabled = t.units < TRANSFORM_COST_UNITS || t.ap < TRANSFORM_COST_AP;
+    btn.disabled = t.units < CONFIG.transformCostUnits || t.ap < CONFIG.transformCostAp;
   }
   transformMenuEl.classList.add('show');
 }
@@ -406,26 +481,37 @@ canvas.addEventListener('pointercancel', () => {
 
 document.querySelector('#btn-restart')!.addEventListener('click', () => {
   if (mode === 'guest') return;
+  if (playtestDef) {
+    startPlaytest(playtestDef);
+    return;
+  }
   state = mode === 'host' ? loadNetLevel(levelIndex) : loadLevel(levelIndex);
   if (mode === 'host') host?.send({ t: 'start', levelIndex });
 });
 document.querySelector('#btn-prev')!.addEventListener('click', () => {
-  if (mode === 'guest') return;
+  if (mode === 'guest' || playtestDef) return;
   state = loadLevel(levelIndex - 1);
   if (mode === 'host') host?.send({ t: 'start', levelIndex });
 });
 document.querySelector('#btn-next')!.addEventListener('click', () => {
-  if (mode === 'guest') return;
+  if (mode === 'guest' || playtestDef) return;
   state = loadLevel(levelIndex + 1);
   if (mode === 'host') host?.send({ t: 'start', levelIndex });
 });
+document.querySelector('#btn-back-editor')!.addEventListener('click', () => {
+  if (playtestDef) backToEditor();
+});
 overlayRestartBtn.addEventListener('click', () => {
   if (mode === 'guest') return;
+  if (playtestDef) {
+    startPlaytest(playtestDef);
+    return;
+  }
   state = mode === 'host' ? loadNetLevel(levelIndex) : loadLevel(levelIndex);
   if (mode === 'host') host?.send({ t: 'start', levelIndex });
 });
 overlayNextBtn.addEventListener('click', () => {
-  if (mode === 'guest') return;
+  if (mode === 'guest' || playtestDef) return;
   state = loadLevel(levelIndex + 1);
   if (mode === 'host') host?.send({ t: 'start', levelIndex });
 });
@@ -441,7 +527,7 @@ function showOverlay(): void {
     overlayTitleEl.style.color = '#f87171';
   }
   const guestWaiting = mode === 'guest';
-  overlayNextBtn.style.display = !guestWaiting && state.phase === 'won' ? '' : 'none';
+  overlayNextBtn.style.display = !guestWaiting && !playtestDef && state.phase === 'won' ? '' : 'none';
   overlayRestartBtn.style.display = guestWaiting ? 'none' : '';
   overlayEl.classList.add('show');
 }
@@ -459,11 +545,11 @@ function frame(now: number): void {
     // 客人端:不跑游戏逻辑,只本地推进队伍位置等下一帧快照(交战中的队伍停驻)
     for (const s of state.squads) {
       if (s.fighting) continue;
-      s.travelled = Math.min(s.travelled + SQUAD_SPEED * dt, s.dist);
+      s.travelled = Math.min(s.travelled + CONFIG.squadSpeed * dt, s.dist);
       s.x = state.towers[s.from].x + s.dirX * s.travelled;
       s.y = state.towers[s.from].y + s.dirY * s.travelled;
     }
-  } else if (!lobbyEl.classList.contains('show')) {
+  } else if (mode !== 'editor' && !lobbyEl.classList.contains('show')) {
     update(state, dt);
     if (mode === 'host' && host?.hasGuest()) {
       snapTimer -= dt;
@@ -474,19 +560,39 @@ function frame(now: number): void {
     }
   }
 
-  if (state.phase !== 'playing' && !overlayShown) {
-    overlayShown = true;
-    setTimeout(showOverlay, 600); // 让最后一波战斗动画播完
-  } else if (state.phase === 'playing') {
-    overlayShown = false;
+  if (mode !== 'editor') {
+    if (state.phase !== 'playing' && !overlayShown) {
+      overlayShown = true;
+      setTimeout(showOverlay, 600); // 让最后一波战斗动画播完
+    } else if (state.phase === 'playing') {
+      overlayShown = false;
+    }
   }
 
   const scale = Math.min(canvas.width / LOGICAL_W, canvas.height / LOGICAL_H);
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
-  draw(ctx, state, drag, LOGICAL_W, LOGICAL_H);
+  if (mode === 'editor') {
+    draw(ctx, editorState(), drag, LOGICAL_W, LOGICAL_H);
+    editorDraw(ctx); // 选中圈/连线预览等编辑器附加层
+  } else {
+    draw(ctx, state, drag, LOGICAL_W, LOGICAL_H);
+  }
 
   requestAnimationFrame(frame);
 }
+
+// ---------- 编辑器与调参面板接线 ----------
+
+initEditor({
+  onPlaytest: (def) => startPlaytest(def),
+  onExit: () => {
+    mode = 'solo';
+    lobbyEl.classList.add('show');
+    hudEl.classList.add('hidden');
+    state = createGame(0, LEVELS[0].towers, LEVELS[0].edges); // 大厅背景
+  },
+});
+initTuning();
 
 window.addEventListener('resize', resize);
 resize();

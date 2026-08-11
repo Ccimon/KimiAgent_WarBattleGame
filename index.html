@@ -153,6 +153,60 @@
       }
       #lobby-status { font-size: 14px; color: #94a3b8; }
       #lobby-error { font-size: 13px; color: #f87171; min-height: 16px; }
+      /* 玩法说明:标题旁的问号按钮 + 浮层(选择器要压过 #lobby button 的通用样式) */
+      #lobby #btn-help {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        padding: 0;
+        font-size: 14px;
+        line-height: 1;
+        margin-left: 10px;
+        vertical-align: middle;
+        background: #475569;
+      }
+      #lobby #btn-help:hover { background: #64748b; }
+      #help-panel {
+        position: absolute;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(15, 23, 42, 0.85);
+        border-radius: 12px;
+        z-index: 30;
+      }
+      #help-panel.show { display: flex; }
+      #help-panel .card {
+        max-width: min(560px, 88%);
+        max-height: 86%;
+        overflow-y: auto;
+        background: rgba(30, 41, 59, 0.97);
+        border: 1px solid #475569;
+        border-radius: 14px;
+        padding: 22px 26px;
+        font-size: 14px;
+        line-height: 1.7;
+      }
+      #help-panel h2 { font-size: 18px; margin-bottom: 10px; }
+      #help-panel ul { padding-left: 20px; margin-bottom: 14px; }
+      #help-panel li { margin: 4px 0; color: #cbd5e1; }
+      #help-panel b { color: #e2e8f0; }
+      #help-panel button {
+        display: block;
+        margin: 0 auto;
+        background: #3b82f6;
+        color: #fff;
+        border: none;
+        border-radius: 10px;
+        padding: 8px 26px;
+        font-size: 14px;
+        cursor: pointer;
+      }
+      #help-panel button:hover { background: #2563eb; }
       #room-code-display {
         font-size: 30px;
         font-weight: 700;
@@ -177,6 +231,8 @@
         #lobby-status { font-size: 16px; }
         #lobby-error { font-size: 15px; }
         #room-code-display { font-size: 34px; }
+        #help-panel .card { font-size: 16px; }
+        #help-panel h2 { font-size: 21px; }
         #transform-menu { gap: 8px; padding: 10px; }
         #transform-menu button { font-size: 15px; padding: 10px 12px; }
         #transform-menu button small { font-size: 12px; }
@@ -205,6 +261,146 @@
       #transform-menu button:hover:not(:disabled) { background: #475569; }
       #transform-menu button:disabled { opacity: 0.4; cursor: not-allowed; }
       #transform-menu button small { font-size: 10px; color: #94a3b8; }
+      /* 编辑器面板:容器不拦截画布事件,各控件自身可点(设计见 docs/编辑器设计.md) */
+      #editor-panel {
+        position: absolute;
+        inset: 0;
+        display: none;
+        pointer-events: none;
+        z-index: 15;
+        font-size: 13px;
+      }
+      #editor-panel.show { display: block; }
+      #editor-panel > * { pointer-events: auto; }
+      #editor-panel button {
+        background: #334155;
+        color: #e2e8f0;
+        border: 1px solid #475569;
+        border-radius: 8px;
+        padding: 5px 12px;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      #editor-panel button:hover { background: #475569; }
+      #editor-panel button.secondary { background: rgba(30, 41, 59, 0.85); }
+      #editor-panel button.active { background: #3b82f6; border-color: #3b82f6; }
+      #editor-panel select, #editor-panel input {
+        background: #0f172a;
+        border: 1px solid #475569;
+        border-radius: 8px;
+        color: #e2e8f0;
+        padding: 4px 8px;
+        font-size: 13px;
+      }
+      .ed-toolbar {
+        position: absolute;
+        top: 10px;
+        left: 12px;
+        right: 12px;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+        background: rgba(15, 23, 42, 0.85);
+        border: 1px solid #475569;
+        border-radius: 10px;
+        padding: 8px 10px;
+      }
+      .ed-tools { display: flex; gap: 4px; }
+      #ed-name { width: 110px; }
+      /* 属性面板(选中塔时)在左侧,数值面板在右侧,互不遮挡 */
+      #ed-props {
+        position: absolute;
+        top: 64px;
+        left: 12px;
+        display: none;
+        flex-direction: column;
+        gap: 8px;
+        background: rgba(15, 23, 42, 0.9);
+        border: 1px solid #475569;
+        border-radius: 10px;
+        padding: 10px 12px;
+      }
+      #ed-props label { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+      #ed-units { width: 70px; }
+      .ed-pos { display: flex; gap: 4px; }
+      .ed-pos input { width: 58px; }
+      #ed-cursor {
+        margin-left: auto;
+        color: #94a3b8;
+        font-variant-numeric: tabular-nums;
+        min-width: 76px;
+        text-align: right;
+      }
+      #ed-export-area {
+        position: absolute;
+        left: 50%;
+        bottom: 36px;
+        transform: translateX(-50%);
+        width: min(520px, 92%);
+        display: none;
+        flex-direction: column;
+        gap: 8px;
+        background: rgba(15, 23, 42, 0.95);
+        border: 1px solid #475569;
+        border-radius: 10px;
+        padding: 10px 12px;
+      }
+      #ed-export-area.show { display: flex; }
+      #ed-export-area .row, #ed-tuning-area .row { display: flex; gap: 8px; }
+      #ed-export-text {
+        width: 100%;
+        height: 180px;
+        background: #0f172a;
+        border: 1px solid #475569;
+        border-radius: 8px;
+        color: #e2e8f0;
+        font-family: ui-monospace, Menlo, monospace;
+        font-size: 12px;
+        padding: 8px;
+        resize: vertical;
+      }
+      #ed-warn { color: #facc15; min-height: 14px; }
+      #ed-tuning-area {
+        position: absolute;
+        top: 64px;
+        right: 12px;
+        bottom: 36px;
+        width: min(340px, 86%);
+        display: none;
+        flex-direction: column;
+        gap: 8px;
+        overflow-y: auto;
+        background: rgba(15, 23, 42, 0.95);
+        border: 1px solid #475569;
+        border-radius: 10px;
+        padding: 10px 12px;
+      }
+      #ed-tuning-area.show { display: flex; }
+      .tn-group h4 { font-size: 13px; color: #93c5fd; margin: 8px 0 4px; }
+      .tn-row { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+      .tn-row span { flex: 0 0 96px; color: #cbd5e1; }
+      .tn-row input[type='range'] { flex: 1; padding: 0; }
+      .tn-row input[type='number'] { width: 64px; }
+      #tn-import-text {
+        width: 100%;
+        height: 90px;
+        background: #0f172a;
+        border: 1px solid #475569;
+        border-radius: 8px;
+        color: #e2e8f0;
+        font-family: ui-monospace, Menlo, monospace;
+        font-size: 12px;
+        padding: 8px;
+        resize: vertical;
+      }
+      #tn-msg { color: #4ade80; min-height: 14px; }
+      @media (orientation: portrait) {
+        .ed-toolbar { font-size: 15px; gap: 6px; }
+        #editor-panel button { font-size: 15px; padding: 8px 12px; }
+        #editor-panel select, #editor-panel input { font-size: 15px; }
+        .tn-row span { flex-basis: 110px; }
+      }
     </style>
   </head>
   <body>
@@ -215,6 +411,7 @@
           <span id="level-name"></span>
         </div>
         <div class="group">
+          <button id="btn-back-editor" style="display:none">返回编辑器</button>
           <button id="btn-prev">上一关</button>
           <button id="btn-restart">重开</button>
           <button id="btn-next">下一关</button>
@@ -234,9 +431,87 @@
         <button data-kind="watch">哨塔<br /><small>行动力回复×2</small></button>
         <button data-kind="mine">矿塔<br /><small>不产兵 邻塔产速+50%</small></button>
       </div>
+      <div id="editor-panel">
+        <div class="ed-toolbar">
+          <div class="ed-tools">
+            <button data-tool="select" class="active">选择</button>
+            <button data-tool="add">加塔</button>
+            <button data-tool="link">连线</button>
+            <button data-tool="delete">删除</button>
+          </div>
+          <select id="ed-level"></select>
+          <input id="ed-name" placeholder="关卡名" />
+          <button id="ed-playtest">试玩</button>
+          <button id="ed-export">导出代码</button>
+          <button id="ed-tuning" class="secondary">数值</button>
+          <button id="ed-exit" class="secondary">返回大厅</button>
+          <span id="ed-cursor"></span>
+        </div>
+        <div id="ed-props">
+          <label>势力
+            <select id="ed-owner">
+              <option value="player">蓝方</option>
+              <option value="ai1">红方 AI</option>
+              <option value="ai2">紫方 AI</option>
+              <option value="neutral">中立</option>
+            </select>
+          </label>
+          <label>兵力 <input id="ed-units" type="number" min="0" max="999" /></label>
+          <label>坐标
+            <span class="ed-pos">
+              <input id="ed-pos-x" type="number" min="34" max="926" step="10" />
+              <input id="ed-pos-y" type="number" min="34" max="566" step="10" />
+            </span>
+          </label>
+          <label>类型
+            <select id="ed-kind">
+              <option value="normal">普通</option>
+              <option value="fortress">堡垒</option>
+              <option value="barracks">兵营</option>
+              <option value="watch">哨塔</option>
+              <option value="mine">矿塔</option>
+            </select>
+          </label>
+          <button id="ed-del-tower" class="secondary">删除此塔</button>
+        </div>
+        <div id="ed-export-area">
+          <textarea id="ed-export-text" readonly></textarea>
+          <div class="row">
+            <button id="ed-copy">复制</button>
+            <button id="ed-export-close" class="secondary">关闭</button>
+          </div>
+          <div id="ed-warn"></div>
+        </div>
+        <div id="ed-tuning-area">
+          <div id="tn-fields"></div>
+          <div class="row">
+            <button id="tn-reset" class="secondary">恢复默认</button>
+            <button id="tn-copy">复制配置代码</button>
+          </div>
+          <textarea id="tn-import-text" placeholder='粘贴配置 JSON(可只含部分字段),点"导入生效"'></textarea>
+          <button id="tn-import-apply" class="secondary">导入生效</button>
+          <div id="tn-msg"></div>
+        </div>
+      </div>
+      <div id="help-panel">
+        <div class="card">
+          <h2>玩法说明</h2>
+          <ul>
+            <li><b>目标</b>:消灭所有 AI 势力即获胜。前 3 关两方对抗,第 4~6 关三方混战(两个 AI 也会互相攻击)。</li>
+            <li><b>出兵</b>:从己方塔按住拖动到目标塔,松开派出<b>一半兵力</b>;只能沿道路(虚线)派兵。</li>
+            <li><b>行动力</b>:塔下绿条,每次出兵消耗一截,随时间回复;不足时无法出兵(预览线变灰)。</li>
+            <li><b>塔转型</b>:在己方普通塔上<b>原地松开</b>,耗 15 兵 + 50 行动力变为特殊塔,单向不可逆:
+              堡垒(守强攻慢)/ 兵营(产速×2、上限略减)/ 哨塔(行动力回复×2)/ 矿塔(不产兵,相邻己方塔产速 +50%)。</li>
+            <li><b>路上遭遇战</b>:敌我队伍在同一条道路上相遇会停下互相消耗,幸存方继续行军。</li>
+            <li><b>升级</b>:塔兵力攒满当前等级上限即自动升级,产速与上限提升;满员停产时数字变黄。</li>
+            <li><b>联机</b>:创建房间把 6 位房间码告诉朋友;房主玩蓝方、朋友玩红方,紫方为 AI。</li>
+          </ul>
+          <button id="btn-help-close">知道了</button>
+        </div>
+      </div>
       <div id="lobby" class="show">
         <div class="panel">
-          <h1>Tower Battle<span class="ver" id="app-version"></span></h1>
+          <h1>Tower Battle<span class="ver" id="app-version"></span><button id="btn-help" aria-label="玩法说明">?</button></h1>
           <div id="lobby-menu" style="display:flex;flex-direction:column;gap:12px;align-items:center">
             <button id="btn-solo">单机开始</button>
             <button id="btn-host" class="secondary">创建联机房间</button>
@@ -244,6 +519,7 @@
               <input id="room-code" placeholder="房间码" maxlength="6" />
               <button id="btn-join" class="secondary">加入房间</button>
             </div>
+            <button id="btn-editor" class="secondary">关卡编辑器</button>
           </div>
           <div id="lobby-room" style="display:none;flex-direction:column;gap:12px;align-items:center">
             <div id="room-code-display"></div>

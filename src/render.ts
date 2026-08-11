@@ -1,5 +1,6 @@
 import type { GameState, Owner, TowerKind } from './game';
-import { TOWER_RADIUS, hasEdge, capOf, AP_MAX, SEND_COST } from './game';
+import { TOWER_RADIUS, hasEdge, capOf } from './game';
+import { CONFIG } from './config';
 
 export const COLORS: Record<Owner, string> = {
   player: '#3b82f6',
@@ -91,8 +92,8 @@ function drawTower(
   const apY = t.y + TOWER_RADIUS + 6;
   ctx.fillStyle = '#334155';
   ctx.fillRect(t.x - apW / 2, apY, apW, 5);
-  ctx.fillStyle = t.ap >= SEND_COST ? '#4ade80' : '#64748b';
-  ctx.fillRect(t.x - apW / 2, apY, (apW * t.ap) / AP_MAX, 5);
+  ctx.fillStyle = t.ap >= CONFIG.sendCost ? '#4ade80' : '#64748b';
+  ctx.fillRect(t.x - apW / 2, apY, (apW * t.ap) / CONFIG.apMax, 5);
 }
 
 function drawSquad(ctx: CanvasRenderingContext2D, state: GameState, s: (typeof state.squads)[number]): void {
@@ -188,7 +189,7 @@ export function draw(
   // 拖线预览(行动力不足时变灰提示)
   if (drag.fromId !== null) {
     const from = state.towers[drag.fromId];
-    const usable = from.ap >= SEND_COST;
+    const usable = from.ap >= CONFIG.sendCost;
     const lineColor = usable ? '#facc15' : '#64748b';
     ctx.beginPath();
     ctx.moveTo(from.x, from.y);
@@ -200,7 +201,7 @@ export function draw(
     ctx.setLineDash([]);
 
     // 预览派出数量
-    const count = Math.floor(from.units * 0.5);
+    const count = Math.floor(from.units * CONFIG.sendRatio);
     if (count > 0) {
       ctx.fillStyle = lineColor;
       ctx.font = 'bold 15px -apple-system, sans-serif';
