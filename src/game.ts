@@ -53,7 +53,8 @@ export interface Personality {
 export interface GameState {
   towers: Tower[];
   squads: Squad[];
-  edges: [number, number][]; // 道路:只能沿边派兵(无向)
+  edges: [number, number][]; // 道路拓扑:只能沿边派兵(无向)
+  paths: EdgePath[]; // 道路几何:与 edges 对应的折线路径(含弧长表)
   phase: Phase;
   levelIndex: number;
   time: number;
@@ -88,7 +89,88 @@ export interface TowerInit {
   kind?: TowerKind; // 默认普通塔
 }
 
-export function createGame(levelIndex: number, defs: TowerInit[], edges: [number, number][]): GameState {
+// 道路边定义:[a, b] 为直线;[a, b, via] 途经 via 折点(折线路径,用于绕行设计)
+export type EdgeDef = [number, number] | [number, number, [number, number][]];
+
+// 预计算的边路径:控制点(塔心+弯折点)经样条平滑后的密集折点 + 累计弧长,行军/遭遇/渲染都按弧长采样
+export interface EdgePath {
+  a: number;
+  b: number;
+  pts: { x: number; y: number }[];
+  cum: number[]; // cum[0]=0,末项 = len
+  len: number;
+}
+
+// Catmull-Rom 样条细分:把控制点序列(塔心 + 弯折点)平滑成密集折点,曲线穿过每个控制点,
+// 两端做端点钳制;直线边(无弯折点)不处理。逻辑/渲染共用细分结果,保证"所见即所走"
+const SMOOTH_SEG = 8; // 每个控制点细分的采样数
+function smoothPath(pts: { x: number; y: number }[]): { x: number; y: number }[] {
+  if (pts.length <= 2) return pts;
+  const get = (i: number): { x: number; y: number } => pts[Math.min(Math.max(i, 0), pts.length - 1)];
+  const out: { x: number; y: number }[] = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = get(i - 1);
+    const p1 = get(i);
+    const p2 = get(i + 1);
+    const p3 = get(i + 2);
+    for (let j = 0; j < SMOOTH_SEG; j++) {
+      const t = j / SMOOTH_SEG;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      out.push({
+        x: 0.5 * (2 * p1.x + (-p0.x + p2.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
+        y: 0.5 * (2 * p1.y + (-p0.y + p2.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3),
+      });
+    }
+  }
+  out.push(pts[pts.length - 1]);
+  return out;
+}
+
+function buildPath(a: number, b: number, towers: Tower[], via?: [number, number][]): EdgePath {
+  const ctrl = [
+    { x: towers[a].x, y: towers[a].y },
+    ...(via ?? []).map(([x, y]) => ({ x, y })),
+    { x: towers[b].x, y: towers[b].y },
+  ];
+  const pts = smoothPath(ctrl);
+  const cum = [0];
+  for (let i = 1; i < pts.length; i++) {
+    cum.push(cum[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y));
+  }
+  return { a, b, pts, cum, len: cum[cum.length - 1] };
+}
+
+// 两塔之间的路径(无向);拓扑校验用 hasEdge,几何用本函数
+export function pathBetween(state: GameState, a: number, b: number): EdgePath | null {
+  for (const p of state.paths) {
+    if ((p.a === a && p.b === b) || (p.a === b && p.b === a)) return p;
+  }
+  return null;
+}
+
+// 沿路径采样:距 from 端 travelled 弧长处的坐标与行进方向(供行军推进/联机重建/渲染轨迹)
+export function sampleOnPath(
+  p: EdgePath,
+  from: number,
+  travelled: number,
+): { x: number; y: number; dirX: number; dirY: number } {
+  const fwd = p.a === from;
+  const d = Math.min(Math.max(fwd ? travelled : p.len - travelled, 0), p.len);
+  let i = 1;
+  while (i < p.cum.length - 1 && p.cum[i] < d) i++;
+  const segLen = p.cum[i] - p.cum[i - 1] || 1;
+  const t = (d - p.cum[i - 1]) / segLen;
+  const A = p.pts[i - 1];
+  const B = p.pts[i];
+  const dx = B.x - A.x;
+  const dy = B.y - A.y;
+  const l = Math.hypot(dx, dy) || 1;
+  const sgn = fwd ? 1 : -1; // 反向行走时切向取反
+  return { x: A.x + dx * t, y: A.y + dy * t, dirX: (dx / l) * sgn, dirY: (dy / l) * sgn };
+}
+
+export function createGame(levelIndex: number, defs: TowerInit[], edges: EdgeDef[]): GameState {
   // 每个 AI 势力独立随机抽性格(允许重复)
   const aiTimers: Partial<Record<Owner, number>> = {};
   const aiTraits: Partial<Record<Owner, Personality>> = {};
@@ -97,19 +179,22 @@ export function createGame(levelIndex: number, defs: TowerInit[], edges: [number
     aiTraits[f] = p;
     aiTimers[f] = p.interval;
   }
-  return {    towers: defs.map((d, i) => ({
-      id: i,
-      x: d.x,
-      y: d.y,
-      owner: d.owner,
-      kind: d.kind ?? 'normal',
-      units: d.units,
-      level: levelOf(d.units, d.kind ?? 'normal'),
-      prodAcc: 0,
-      ap: CONFIG.apMax,
-    })),
+  const towers: Tower[] = defs.map((d, i) => ({
+    id: i,
+    x: d.x,
+    y: d.y,
+    owner: d.owner,
+    kind: d.kind ?? 'normal',
+    units: d.units,
+    level: levelOf(d.units, d.kind ?? 'normal'),
+    prodAcc: 0,
+    ap: CONFIG.apMax,
+  }));
+  return {
+    towers,
     squads: [],
-    edges,
+    edges: edges.map((e) => [e[0], e[1]] as [number, number]),
+    paths: edges.map((e) => buildPath(e[0], e[1], towers, e.length === 3 ? e[2] : undefined)),
     phase: 'playing',
     levelIndex,
     time: 0,
@@ -161,23 +246,25 @@ export function sendUnits(state: GameState, fromId: number, toId: number): boole
   if (!from || !to) return false;
   if (!hasEdge(state, fromId, toId)) return false; // 只能沿道路派兵
   if (from.ap < CONFIG.sendCost) return false; // 行动力不足无法出兵
+  const path = pathBetween(state, fromId, toId);
+  if (!path) return false;
   const count = Math.floor(from.units * CONFIG.sendRatio);
   if (count < 1) return false;
   from.units -= count;
   from.ap -= CONFIG.sendCost;
   from.level = levelOf(from.units, from.kind);
-  const dist = Math.hypot(to.x - from.x, to.y - from.y);
+  const start = sampleOnPath(path, fromId, 0);
   state.squads.push({
     id: state.nextSquadId++,
     owner: from.owner,
     from: fromId,
     target: toId,
     count,
-    x: from.x,
-    y: from.y,
-    dirX: (to.x - from.x) / dist,
-    dirY: (to.y - from.y) / dist,
-    dist,
+    x: start.x,
+    y: start.y,
+    dirX: start.dirX,
+    dirY: start.dirY,
+    dist: path.len, // 路径弧长(曲线边长于直线距离)
     travelled: 0,
     fighting: false,
     dmgAcc: 0,
@@ -415,12 +502,21 @@ export function update(state: GameState, dt: number): void {
     }
   }
 
-  // 队伍行军(交战中的队伍停驻)
+  // 队伍行军(交战中的队伍停驻;沿路径按弧长采样,曲线边自动绕行)
   for (const s of state.squads) {
     if (s.fighting) continue;
     s.travelled += CONFIG.squadSpeed * dt;
-    s.x += s.dirX * CONFIG.squadSpeed * dt;
-    s.y += s.dirY * CONFIG.squadSpeed * dt;
+    const path = pathBetween(state, s.from, s.target);
+    if (path) {
+      const p = sampleOnPath(path, s.from, s.travelled);
+      s.x = p.x;
+      s.y = p.y;
+      s.dirX = p.dirX;
+      s.dirY = p.dirY;
+    } else {
+      s.x += s.dirX * CONFIG.squadSpeed * dt;
+      s.y += s.dirY * CONFIG.squadSpeed * dt;
+    }
   }
   const arrived = state.squads.filter((s) => !s.fighting && s.travelled >= s.dist);
   if (arrived.length > 0) {

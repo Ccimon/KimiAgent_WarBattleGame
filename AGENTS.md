@@ -2,7 +2,7 @@
 
 ## 项目概览
 
-Tower Battle(连线塔战):一个 2D 塔防策略小游戏,支持单机和 P2P 联机(房间码直连)。玩家从己方塔按住拖动到目标塔,松开时派出一半兵力;在己方普通塔上原地松开则弹出转型菜单。前 3 关为两方对抗(蓝 vs 红),第 4~6 关为三方混战(蓝 vs 红 ai1 vs 紫 ai2,两个 AI 也会互相攻击);消灭所有 AI 势力即胜利。联机模式:房主创建房间得 6 位房间码,朋友输入房间码加入,房主选关(仅三方关卡,即第 4~6 关)并开始;房主玩蓝方、客人玩红方(ai1 真人控制)、紫方为 AI;房主浏览器跑权威逻辑,每 100ms 广播快照,客人只发出兵/转型指令;客人掉线后红方由 AI 接管,客人被淘汰后进入观战。内置开发者工具链(设计见 `docs/编辑器设计.md`):大厅「关卡编辑器」入口进入编辑模式(可视化设计关卡 + 数值调参面板),CLI 无头模拟器批量跑 AI 对战验证平衡。使用 TypeScript + Vite 开发,Canvas 2D 渲染,UI 文案和代码注释均为简体中文。
+Tower Battle(连线塔战):一个 2D 塔防策略小游戏,支持单机和 P2P 联机(房间码直连)。玩家从己方塔按住拖动到目标塔,松开时派出一半兵力;在己方普通塔上原地松开则弹出转型菜单。前 3 关为两方对抗(蓝 vs 红),第 4~9 关为三方混战(蓝 vs 红 ai1 vs 紫 ai2,两个 AI 也会互相攻击);消灭所有 AI 势力即胜利。联机模式:房主创建房间得 6 位房间码,朋友输入房间码加入,房主选关(仅三方关卡,即第 4~9 关)并开始;房主玩蓝方、客人玩红方(ai1 真人控制)、紫方为 AI;房主浏览器跑权威逻辑,每 100ms 广播快照,客人只发出兵/转型指令;客人掉线后红方由 AI 接管,客人被淘汰后进入观战。内置开发者工具链(设计见 `docs/编辑器设计.md`):大厅「关卡编辑器」入口进入编辑模式(可视化设计关卡 + 数值调参面板),CLI 无头模拟器批量跑 AI 对战验证平衡。使用 TypeScript + Vite 开发,Canvas 2D 渲染,UI 文案和代码注释均为简体中文。
 
 ## 技术栈与目录结构
 
@@ -10,12 +10,12 @@ Tower Battle(连线塔战):一个 2D 塔防策略小游戏,支持单机和 P2P �
 - `index.html` —— 页面入口:内联全部 CSS,包含 `<canvas id="game">`、HUD 按钮(上一关/重开/下一关/返回编辑器)、胜负 overlay、大厅 overlay(单机/创建房间/加入房间/关卡编辑器,房间码展示与选关)、塔转型菜单(`#transform-menu`)、编辑器面板(`#editor-panel`:工具栏/属性面板/导出区/数值调参抽屉)和操作提示文案;含竖屏媒体查询适配手机触控。
 - `src/main.ts` —— 入口:四种模式(solo/host/guest/editor)、大厅接线、关卡加载、`requestAnimationFrame` 主循环、Pointer 事件(editor 模式委托给 `editor.ts`;游戏内拖放出兵,guest 模式发指令而非本地出兵;原地松开打开转型菜单)、HUD/overlay 按钮绑定、canvas 按 devicePixelRatio 缩放。逻辑画布横屏 960x600 / 竖屏 600x960(竖屏时关卡经 `toPortrait` 坐标转置,关卡永远只按横版设计;**代码不得写死画布尺寸**,用 `LOGICAL_W/H`),切换朝向会重载当前关。host 模式跑 `update` 主循环并每 100ms(`SNAP_INTERVAL`)广播快照;guest 模式不跑逻辑,按快照刷新、本地推进队伍位置做平滑(交战中的队伍不推进、位置以快照为准)。房主校验客人指令:只执行属于红方(ai1)的塔的出兵/转型。
 - `src/net.ts` —— P2P 联机层:`hostRoom`/`joinRoom` 封装 PeerJS,房间码即 Peer ID(前缀 `tower-battle-`,6 位、去掉易混淆字符,撞号自动重试);ICE 配置含国内可达 STUN(小米/B站,Google STUN 在国内被墙)+ Google STUN + OpenRelay 免费 TURN 中继(对称 NAT/受限网络直连失败时走 TCP 443 中继);客人加入有 15 秒打洞超时兜底,失败会提示而不是一直卡在"连接中";消息协议:客→主 `{t:'cmd',from,to}` 与 `{t:'transform',tower,kind}`,主→客 `{t:'start',levelIndex}` 与 `{t:'snap',towers,squads,phase}` 快照(只带动态字段,几何由客人端按 levelIndex 本地重建)。
-- `src/game.ts` —— 纯逻辑层(无 DOM 依赖):`Owner`('player'/'ai1'/'ai2'/'neutral')、`GameState`/`Tower`/`Squad` 类型,`createGame`、`sendUnits`、`towerAt`、`hasEdge`、`assignAi`、`transformTower`、`update(dt)`;**道路机制**(`GameState.edges`,只能沿边派兵,设计见 `docs/道路与行动力设计.md`)、**行动力机制**(每塔 `ap`,上限 100,出兵固定扣 34,每秒回 8,不足则 `sendUnits` 失败)、**路上遭遇战**(同边异势力队伍相距 <16px 即停驻,1:1 互耗每秒各掉 8 兵,幸存方继续行军,设计见 `docs/路上战斗设计.md`)、**塔类型**(`TowerKind` + `kindMods` 倍率表(在 `src/config.ts`),设计见 `docs/塔类型设计.md`:堡垒守战减伤 25%/产速减半、兵营产速×2/上限×0.75、哨塔 AP 回复×2、矿塔不产兵但给相邻己方塔 +50% 产速光环;类型易主不变,外形按类型绘制;**塔转型** `transformTower`:己方普通塔消耗 15 兵 + 50 AP 变为指定类型,单向不可逆,联机走 `{t:'transform'}` 指令由房主校验);内置产兵速率/上限表 `levelStats`(在 `src/config.ts`)、等级推导(`levelOf(units, kind)`:攒满当前等级生产上限即升级,阈值 = 各等级上限 × 类型倍率,所有塔都能自产升满)、行为制 AI(设计见 `docs/AI行为设计.md`:每次 `aiTick` 按性格顺序评估 支援/扩张/进攻 三种行为,均受道路邻接约束——支援按净威胁一对一救援且有"援军到不了就放弃"判断,扩张低门槛抢中立塔并去重,进攻每塔打最弱邻接敌塔、猎强优先最强势力)、AI 性格表 `aiPersonalities`(在 `src/config.ts`,莽夫/龟缩/猎强/农夫,`createGame` 时为每个 AI 势力随机分配)、每势力独立计时(`update` 遍历 `aiTraits` 键,模拟器/联机接管可扩展到任意势力)、胜负判定(玩家全灭判负,所有 AI 势力全灭判胜;`phase` 语义以蓝方为基准,客人端显示时需反转)。
-- `src/levels.ts` —— 关卡数据 `LEVELS`(`LevelDef` = 名称 + 初始塔数组 + 道路边表 `edges`,6 关全部手工标边;前 3 关两方,后 3 关三方会战)和 `toPortrait`(竖屏坐标转置,横版设计只需维护一份)。
+- `src/game.ts` —— 纯逻辑层(无 DOM 依赖):`Owner`('player'/'ai1'/'ai2'/'neutral')、`GameState`/`Tower`/`Squad` 类型,`createGame`、`sendUnits`、`towerAt`、`hasEdge`、`assignAi`、`transformTower`、`update(dt)`;**道路机制**(`GameState.edges` 拓扑 + `GameState.paths` 预计算平滑路径(Catmull-Rom 细分,过弯折点),只能沿边派兵,行军按弧长 `sampleOnPath` 采样,曲线边自动绕行,设计见 `docs/道路与行动力设计.md`)、**行动力机制**(每塔 `ap`,上限 100,出兵固定扣 34,每秒回 8,不足则 `sendUnits` 失败)、**路上遭遇战**(同边异势力队伍相距 <16px 即停驻,1:1 互耗每秒各掉 8 兵,幸存方继续行军,设计见 `docs/路上战斗设计.md`)、**塔类型**(`TowerKind` + `kindMods` 倍率表(在 `src/config.ts`),设计见 `docs/塔类型设计.md`:堡垒守战减伤 25%/产速减半、兵营产速×2/上限×0.75、哨塔 AP 回复×2、矿塔不产兵但给相邻己方塔 +50% 产速光环;类型易主不变,外形按类型绘制;**塔转型** `transformTower`:己方普通塔消耗 15 兵 + 50 AP 变为指定类型,单向不可逆,联机走 `{t:'transform'}` 指令由房主校验);内置产兵速率/上限表 `levelStats`(在 `src/config.ts`)、等级推导(`levelOf(units, kind)`:攒满当前等级生产上限即升级,阈值 = 各等级上限 × 类型倍率,所有塔都能自产升满)、行为制 AI(设计见 `docs/AI行为设计.md`:每次 `aiTick` 按性格顺序评估 支援/扩张/进攻 三种行为,均受道路邻接约束——支援按净威胁一对一救援且有"援军到不了就放弃"判断,扩张低门槛抢中立塔并去重,进攻每塔打最弱邻接敌塔、猎强优先最强势力)、AI 性格表 `aiPersonalities`(在 `src/config.ts`,莽夫/龟缩/猎强/农夫,`createGame` 时为每个 AI 势力随机分配)、每势力独立计时(`update` 遍历 `aiTraits` 键,模拟器/联机接管可扩展到任意势力)、胜负判定(玩家全灭判负,所有 AI 势力全灭判胜;`phase` 语义以蓝方为基准,客人端显示时需反转)。
+- `src/levels.ts` —— 关卡数据 `LEVELS`(`LevelDef` = 名称 + 初始塔数组 + 道路边表 `edges`:`EdgeDef` 为 `[a,b]` 直线或 `[a,b,via]` 平滑曲线(样条过弯折点),4~9 关部分道路为曲线;前 3 关两方,后 6 关三方会战,其中 7~9 关据点更密(9~12 塔))和 `toPortrait`(竖屏坐标转置,via 同步转置,横版设计只需维护一份)。
 - `src/render.ts` —— Canvas 绘制层:`draw(ctx, state, drag, w, h)`,只读 `GameState`,含道路连线、按塔类型描外形(普通圆/堡垒方/兵营三角/哨塔菱形/矿塔六边形)、等级标记、塔下行动力条、拖拽预览(高亮邻接合法目标,行动力不足时预览变灰)、交战闪烁特效。
 - `src/config.ts` —— 数值配置层:`DEFAULT_CONFIG`(出兵/AP/速度/遭遇战/光环/转型消耗 + `levelStats` + `kindMods` + `aiPersonalities`)、可变单例 `CONFIG`(原地深合并的 `resetConfig`/`applyConfig`);`game.ts`/`render.ts`/`main.ts` 运行时读 `CONFIG.xxx`,调参面板改动即生效。
-- `src/version.ts` —— `VERSION` 常量,版本号唯一来源(当前 0.2.4),显示在大厅标题栏。
-- `src/editor.ts` —— 关卡编辑器(`mode='editor'`):永远编辑横版原始坐标(竖屏显示转置、指针反向还原),选择/加塔/连线/删除四种工具,属性面板改势力/兵力/类型,试玩(`playtestDef`,HUD 有「返回编辑器」),导出与 `levels.ts` 风格一致的 `LevelDef` 代码贴回源码。
+- `src/version.ts` —— `VERSION` 常量,版本号唯一来源(当前 0.2.6),显示在大厅标题栏。
+- `src/editor.ts` —— 关卡编辑器(`mode='editor'`):永远编辑横版原始坐标(竖屏显示转置、指针反向还原),选择/加塔/连线/删除四种工具(连线工具下按住道路拖出弯折点 = 曲线道路,点弯折点删除),属性面板改势力/兵力/坐标/类型,试玩(`playtestDef`,HUD 有「返回编辑器」),导出与 `levels.ts` 风格一致的 `LevelDef` 代码贴回源码。
 - `src/tuning.ts` —— 数值调参面板(编辑器内「数值」页签):schema 驱动生成滑杆改写 `CONFIG`,支持恢复默认/复制配置代码/导入 JSON;配置只存内存,不写 localStorage。
 - `sim/simulate.ts` —— 无头模拟器(`npm run sim`):全员 AI(`assignAi` 含蓝方)固定步长批量对战,按存活势力统计胜率;判胜不看 `phase`,循环内每 tick 强制 `phase='playing'` 续跑;第三参数可挂配置 JSON 对比调参效果。
 - `vite.config.ts` —— 仅设置 `base: '/KimiAgent_WarBattleGame/'`,用于 GitHub Pages 项目站点(资源需带仓库名前缀)。
@@ -30,7 +30,7 @@ Tower Battle(连线塔战):一个 2D 塔防策略小游戏,支持单机和 P2P �
 - `npm run dev` —— 启动 Vite 开发服务器(默认 5173 端口);macOS 上也可双击 `启动游戏.command`。
 - `npm run build` —— 先 `tsc`(类型检查,noEmit)再 `vite build`,产物输出到 `dist/`。
 - `npm run preview` —— 预览构建产物。
-- `npm run sim -- [关卡号1-6] [局数] [配置JSON路径]` —— 无头模拟器(`tsx` 直跑,默认第 4 关 100 局),统计各势力胜率验证数值。
+- `npm run sim -- [关卡号1-9] [局数] [配置JSON路径]` —— 无头模拟器(`tsx` 直跑,默认第 4 关 100 局),统计各势力胜率验证数值。
 
 ## 代码风格
 

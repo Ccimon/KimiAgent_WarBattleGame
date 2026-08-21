@@ -4,6 +4,7 @@ import {
   createGame,
   towerAt,
   TOWER_RADIUS,
+  type EdgeDef,
   type GameState,
   type Owner,
   type TowerInit,
@@ -16,7 +17,7 @@ type Tool = 'select' | 'add' | 'link' | 'delete';
 interface EditDef {
   name: string;
   towers: TowerInit[];
-  edges: [number, number][];
+  edges: EdgeDef[];
 }
 
 // 原始坐标画布固定为横版 960x600(关卡只按横版设计的既有约定)
@@ -28,6 +29,8 @@ let tool: Tool = 'select';
 let selected: number | null = null;
 let dragging = false; // 选择工具下正在拖动移塔
 let linkFrom: number | null = null; // 连线工具的起点塔
+let bend: { edge: number; via: number } | null = null; // 正在拖动的弯折点(连线工具下按住道路拖出)
+let bendMoved = false; // 弯折点是否拖动过(未拖动松开 = 删除该弯折点;新建的点未拖动即点空,顺带删除等于无操作)
 let pointer = { x: 0, y: 0 }; // 最近一次指针位置(显示坐标,连线预览用)
 let disp: GameState = createGame(-1, [], []); // 显示用状态(竖屏已转置,塔为副本)
 let active = false;
@@ -106,7 +109,7 @@ function updateWarn(): string {
 // ---------- 编辑操作 ----------
 
 function toggleEdge(a: number, b: number): void {
-  const i = def.edges.findIndex(([x, y]) => (x === a && y === b) || (x === b && y === a));
+  const i = def.edges.findIndex((e) => (e[0] === a && e[1] === b) || (e[0] === b && e[1] === a));
   if (i >= 0) def.edges.splice(i, 1);
   else def.edges.push([a, b]);
 }
@@ -114,12 +117,114 @@ function toggleEdge(a: number, b: number): void {
 function deleteTower(id: number): void {
   def.towers.splice(id, 1);
   // 删除关联边,其余边下标前移
+  const remap = (i: number): number => (i > id ? i - 1 : i);
   def.edges = def.edges
-    .filter(([a, b]) => a !== id && b !== id)
-    .map(([a, b]) => [a > id ? a - 1 : a, b > id ? b - 1 : b]);
+    .filter((e) => e[0] !== id && e[1] !== id)
+    .map((e) => (e.length === 3 ? [remap(e[0]), remap(e[1]), e[2]] : [remap(e[0]), remap(e[1])]));
   if (selected === id) selected = null;
   else if (selected !== null && selected > id) selected -= 1;
   rebuild();
+}
+
+// ---------- 弯折点(曲线道路) ----------
+
+// 横版原始坐标 -> 显示坐标(竖屏转置)
+function toDisp(x: number, y: number): { x: number; y: number } {
+  return isPortrait() ? { x: y, y: x } : { x, y };
+}
+
+// 一条边的显示坐标折线(塔心 + 弯折点)
+function edgeDispPts(e: EdgeDef): { x: number; y: number }[] {
+  const ta = disp.towers[e[0]];
+  const tb = disp.towers[e[1]];
+  const via = e.length === 3 ? e[2].map(([x, y]) => toDisp(x, y)) : [];
+  return [{ x: ta.x, y: ta.y }, ...via, { x: tb.x, y: tb.y }];
+}
+
+function distToSeg(p: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const l2 = dx * dx + dy * dy;
+  const t = l2 === 0 ? 0 : Math.min(Math.max(((p.x - a.x) * dx + (p.y - a.y) * dy) / l2, 0), 1);
+  return Math.hypot(p.x - (a.x + dx * t), p.y - (a.y + dy * t));
+}
+
+const BEND_HIT = 12; // 弯折点/道路的命中半径(显示坐标像素)
+
+// 连线工具下点空白处:命中已有弯折点则抓起,命中道路中段则插入新弯折点并抓起
+function grabBend(p: { x: number; y: number }): void {
+  for (let ei = 0; ei < def.edges.length; ei++) {
+    const e = def.edges[ei];
+    const pts = edgeDispPts(e);
+    // 先查已有弯折点(pts[1..n-2] 即 via)
+    for (let vi = 1; vi < pts.length - 1; vi++) {
+      if (Math.hypot(p.x - pts[vi].x, p.y - pts[vi].y) <= BEND_HIT) {
+        bend = { edge: ei, via: vi - 1 };
+        bendMoved = false;
+        return;
+      }
+    }
+  }
+  for (let ei = 0; ei < def.edges.length; ei++) {
+    const e = def.edges[ei];
+    // 命中判定按平滑后的曲线(与画面一致,paths 与 def.edges 顺序对应)
+    const path = disp.paths[ei];
+    if (!path) continue;
+    let hitCurve = false;
+    for (let k = 0; k < path.pts.length - 1; k++) {
+      if (distToSeg(p, path.pts[k], path.pts[k + 1]) <= BEND_HIT) {
+        hitCurve = true;
+        break;
+      }
+    }
+    if (!hitCurve) continue;
+    // 插入位置按控制点折线(塔心+弯折点)最近的段决定
+    const pts = edgeDispPts(e);
+    let bestK = 0;
+    let bestD = Infinity;
+    for (let k = 0; k < pts.length - 1; k++) {
+      const d = distToSeg(p, pts[k], pts[k + 1]);
+      if (d < bestD) {
+        bestD = d;
+        bestK = k;
+      }
+    }
+    // 在第 bestK 段处插入新弯折点,via 下标即段号
+    const via = e.length === 3 ? [...e[2]] : [];
+    const r = toRaw(p);
+    via.splice(bestK, 0, [clampRound(r.x, RAW_W), clampRound(r.y, RAW_H)]);
+    def.edges[ei] = [e[0], e[1], via];
+    bend = { edge: ei, via: bestK };
+    bendMoved = false;
+    rebuild();
+    return;
+  }
+}
+
+// 拖动中的弯折点移到指针处(吸附网格)
+function moveBend(p: { x: number; y: number }): void {
+  if (!bend) return;
+  const e = def.edges[bend.edge];
+  if (e.length !== 3) return;
+  const r = toRaw(p);
+  e[2][bend.via] = [clampRound(r.x, RAW_W), clampRound(r.y, RAW_H)];
+  bendMoved = true;
+  rebuild();
+}
+
+// 松开:未拖动过 = 点击,删除该弯折点(新建的点没拖动也顺带删掉,即点一下道路无操作)
+function releaseBend(): void {
+  if (!bend) return;
+  if (!bendMoved) {
+    const e = def.edges[bend.edge];
+    if (e.length === 3) {
+      e[2].splice(bend.via, 1);
+      if (e[2].length === 0) def.edges[bend.edge] = [e[0], e[1]]; // 没有弯折点了退回直线边
+      rebuild();
+    }
+  }
+  bend = null;
+  bendMoved = false;
 }
 
 // ---------- 指针交互(main.ts 在编辑器模式下委托过来,坐标为显示逻辑坐标) ----------
@@ -141,7 +246,11 @@ export function editorPointerDown(p: { x: number; y: number }): void {
     return;
   }
   if (tool === 'link') {
-    linkFrom = hit ? hit.id : null;
+    if (hit) {
+      linkFrom = hit.id;
+    } else {
+      grabBend(p); // 点在道路/弯折点上 = 掰弯道路
+    }
     return;
   }
   selected = hit ? hit.id : null;
@@ -152,6 +261,10 @@ export function editorPointerDown(p: { x: number; y: number }): void {
 export function editorPointerMove(p: { x: number; y: number }): void {
   pointer = p;
   updateCursor(p);
+  if (bend) {
+    moveBend(p);
+    return;
+  }
   if (tool === 'select' && dragging && selected !== null) {
     const r = toRaw(p);
     def.towers[selected].x = clampRound(r.x, RAW_W);
@@ -162,6 +275,10 @@ export function editorPointerMove(p: { x: number; y: number }): void {
 
 export function editorPointerUp(p: { x: number; y: number }): void {
   pointer = p;
+  if (bend) {
+    releaseBend();
+    return;
+  }
   if (tool === 'link' && linkFrom !== null) {
     const hit = towerAt(disp, p.x, p.y);
     if (hit && hit.id !== linkFrom) toggleEdge(linkFrom, hit.id);
@@ -185,7 +302,14 @@ function exportCode(): string {
   }
   lines.push('    ],');
   lines.push('    edges: [');
-  for (const [a, b] of def.edges) lines.push(`      [${a}, ${b}],`);
+  for (const e of def.edges) {
+    if (e.length === 3) {
+      const via = e[2].map(([x, y]) => `[${x}, ${y}]`).join(', ');
+      lines.push(`      [${e[0]}, ${e[1]}, [${via}]],`);
+    } else {
+      lines.push(`      [${e[0]}, ${e[1]}],`);
+    }
+  }
   lines.push('    ],');
   lines.push('  },');
   return lines.join('\n');
@@ -211,8 +335,22 @@ export function editorState(): GameState {
   return disp;
 }
 
-// 编辑器附加层:选中塔高亮圈 + 连线预览(在主 draw() 之后叠加)
+// 编辑器附加层:弯折点 + 选中塔高亮圈 + 连线预览(在主 draw() 之后叠加)
 export function editorDraw(ctx: CanvasRenderingContext2D): void {
+  // 弯折点(小圆点,连线工具下可拖动/点击删除)
+  for (const e of def.edges) {
+    if (e.length !== 3) continue;
+    for (const [x, y] of e[2]) {
+      const d = toDisp(x, y);
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, 6, 0, Math.PI * 2);
+      ctx.fillStyle = '#facc15';
+      ctx.fill();
+      ctx.strokeStyle = '#0f172a';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+  }
   if (selected !== null && disp.towers[selected]) {
     const t = disp.towers[selected];
     ctx.beginPath();

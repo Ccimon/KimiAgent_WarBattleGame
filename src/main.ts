@@ -2,6 +2,8 @@ import {
   assignAi,
   createGame,
   levelOf,
+  pathBetween,
+  sampleOnPath,
   sendUnits,
   towerAt,
   transformTower,
@@ -30,7 +32,7 @@ import { VERSION } from './version';
 let LOGICAL_W = 960;
 let LOGICAL_H = 600;
 const SNAP_INTERVAL = 0.1; // 房主快照广播间隔(秒)
-const NET_LEVELS = [3, 4, 5]; // 联机可选关卡(三方会战)
+const NET_LEVELS = [3, 4, 5, 6, 7, 8]; // 联机可选关卡(三方会战)
 
 function isPortrait(): boolean {
   return window.innerHeight > window.innerWidth;
@@ -341,26 +343,33 @@ function applySnapshot(snap: Snapshot): void {
     t.kind = snap.towers[i].kind; // 转型会改类型,同步给客人端
     t.level = levelOf(t.units, t.kind);
   }
-  // 队伍按快照重建位置;本地已推进的取较大值避免回跳
+  // 队伍按快照重建位置(几何按路径采样,曲线边与房主一致);本地已推进的取较大值避免回跳
   const local = new Map(state.squads.map((s) => [s.id, s.travelled]));
   state.squads = snap.squads.map((ss) => {
     const from = state.towers[ss.from];
     const to = state.towers[ss.target];
-    const dist = Math.hypot(to.x - from.x, to.y - from.y);
+    const path = pathBetween(state, ss.from, ss.target);
+    const dist = path ? path.len : Math.hypot(to.x - from.x, to.y - from.y);
     // 交战中的队伍位置以快照为准(不回跳保护),其余取较大值避免回跳
     const travelled = ss.fighting ? ss.travelled : Math.max(ss.travelled, local.get(ss.id) ?? 0);
-    const dirX = (to.x - from.x) / dist;
-    const dirY = (to.y - from.y) / dist;
+    const p = path
+      ? sampleOnPath(path, ss.from, travelled)
+      : {
+          x: from.x + ((to.x - from.x) / dist) * travelled,
+          y: from.y + ((to.y - from.y) / dist) * travelled,
+          dirX: (to.x - from.x) / dist,
+          dirY: (to.y - from.y) / dist,
+        };
     return {
       id: ss.id,
       owner: ss.owner,
       from: ss.from,
       target: ss.target,
       count: ss.count,
-      x: from.x + dirX * travelled,
-      y: from.y + dirY * travelled,
-      dirX,
-      dirY,
+      x: p.x,
+      y: p.y,
+      dirX: p.dirX,
+      dirY: p.dirY,
       dist,
       travelled,
       fighting: ss.fighting,
@@ -546,8 +555,17 @@ function frame(now: number): void {
     for (const s of state.squads) {
       if (s.fighting) continue;
       s.travelled = Math.min(s.travelled + CONFIG.squadSpeed * dt, s.dist);
-      s.x = state.towers[s.from].x + s.dirX * s.travelled;
-      s.y = state.towers[s.from].y + s.dirY * s.travelled;
+      const path = pathBetween(state, s.from, s.target);
+      if (path) {
+        const p = sampleOnPath(path, s.from, s.travelled);
+        s.x = p.x;
+        s.y = p.y;
+        s.dirX = p.dirX;
+        s.dirY = p.dirY;
+      } else {
+        s.x = state.towers[s.from].x + s.dirX * s.travelled;
+        s.y = state.towers[s.from].y + s.dirY * s.travelled;
+      }
     }
   } else if (mode !== 'editor' && !lobbyEl.classList.contains('show')) {
     update(state, dt);

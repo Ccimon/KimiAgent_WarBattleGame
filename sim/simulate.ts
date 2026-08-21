@@ -1,5 +1,5 @@
 // 无头模拟器:脱离浏览器批量跑 AI 对战,统计各势力胜率,用于验证数值调整(设计见 docs/编辑器设计.md)
-// 用法:npm run sim -- [关卡号1-6] [局数] [配置JSON路径]   默认:第 4 关、100 局、默认配置
+// 用法:npm run sim -- [关卡号1-9] [局数] [配置JSON路径]   默认:第 4 关、100 局、默认配置
 import { readFileSync } from 'node:fs';
 import { assignAi, createGame, update, type GameState, type Owner } from '../src/game';
 import { LEVELS } from '../src/levels';

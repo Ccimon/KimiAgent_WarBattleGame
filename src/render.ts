@@ -1,5 +1,5 @@
 import type { GameState, Owner, TowerKind } from './game';
-import { TOWER_RADIUS, hasEdge, capOf } from './game';
+import { TOWER_RADIUS, hasEdge, capOf, pathBetween } from './game';
 import { CONFIG } from './config';
 
 export const COLORS: Record<Owner, string> = {
@@ -97,14 +97,25 @@ function drawTower(
 }
 
 function drawSquad(ctx: CanvasRenderingContext2D, state: GameState, s: (typeof state.squads)[number]): void {
-  const from = state.towers[s.from];
   const color = COLORS[s.owner];
   const r = 9 + Math.min(12, s.count * 0.25);
 
-  // 行军轨迹
+  // 行军轨迹:沿路径已走过的部分(曲线边画折线轨迹)
+  const path = pathBetween(state, s.from, s.target);
   ctx.beginPath();
-  ctx.moveTo(from.x, from.y);
-  ctx.lineTo(s.x, s.y);
+  if (path) {
+    const n = path.pts.length;
+    const fwd = path.a === s.from;
+    const pts = fwd ? path.pts : Array.from({ length: n }, (_, i) => path.pts[n - 1 - i]);
+    const cum = fwd ? path.cum : Array.from({ length: n }, (_, i) => path.len - path.cum[n - 1 - i]);
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < n && cum[i] < s.travelled; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.lineTo(s.x, s.y);
+  } else {
+    const from = state.towers[s.from];
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(s.x, s.y);
+  }
   ctx.strokeStyle = color + '44';
   ctx.lineWidth = 4;
   ctx.stroke();
@@ -162,16 +173,14 @@ export function draw(
     ctx.stroke();
   }
 
-  // 道路(塔间连线,只能沿边派兵)
+  // 道路(塔间连线,只能沿边派兵;曲线边按折线路径绘制)
   ctx.strokeStyle = '#475569';
   ctx.lineWidth = 3;
   ctx.setLineDash([2, 6]);
-  for (const [a, b] of state.edges) {
-    const ta = state.towers[a];
-    const tb = state.towers[b];
+  for (const p of state.paths) {
     ctx.beginPath();
-    ctx.moveTo(ta.x, ta.y);
-    ctx.lineTo(tb.x, tb.y);
+    ctx.moveTo(p.pts[0].x, p.pts[0].y);
+    for (let i = 1; i < p.pts.length; i++) ctx.lineTo(p.pts[i].x, p.pts[i].y);
     ctx.stroke();
   }
   ctx.setLineDash([]);
